@@ -208,4 +208,84 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  testWidgets(
+    'producer panels buy capacity and all four activities play on a compact phone',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(568, 320));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = MemoryStore();
+      await tester.pumpWidget(
+        ForwardGrowers(
+          loadFarm: () async => (
+            farm: Farm(
+              progress: FarmProgress.fresh(balance).copyWith(
+                money: BigInt.from(40),
+                completed: {1, 2, 3, 4, 5, 6, 7},
+              ),
+              store: store,
+              balance: balance,
+              clock: clock.stopwatch(),
+            ),
+            notice: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (final activity in [
+        Activity.dairy,
+        Activity.chickens,
+        Activity.sheep,
+        Activity.bees,
+      ]) {
+        await tester.tap(find.text(activity.label).first);
+        await tester.pump();
+        final level = balance.level(1, activity.index + 1);
+        final kind = level.capacity;
+        if (activity == Activity.dairy) {
+          final buy = find.text(r'Buy cow stall · $35');
+          await tester.ensureVisible(buy);
+          await tester.tap(buy);
+          await tester.pump();
+          expect(find.text('Cow stalls: 3 / 4'), findsOneWidget);
+        }
+        await tester.tap(
+          find.text(activity == Activity.bees ? 'Play' : 'Replay'),
+        );
+        await tester.pump();
+        final tiles = find.byType(PlotTile);
+        expect(tiles, findsNWidgets(activity == Activity.dairy ? 3 : 2));
+        final (first, second, third, collect) = level.production!.actions;
+        for (final tool in [
+          first,
+          second,
+          third,
+          collect,
+          level.production!.hazard.tool,
+        ]) {
+          expect(
+            find.widgetWithText(ActionTile, tool.label).hitTestable(),
+            findsOneWidget,
+          );
+        }
+        for (final tool in [first, second, third, collect]) {
+          await tester.tap(find.widgetWithText(ActionTile, tool.label));
+          await tester.pump();
+          await tester.tap(tiles.first);
+          await tester.pump();
+          if (tool == third) await tester.pump(level.production!.growth);
+        }
+        expect(tester.widget<PlotTile>(tiles.first).plot.stage, Stage.bare);
+        expect(store.saved?.capacity(kind), activity == Activity.dairy ? 3 : 2);
+        await tester.tap(find.byTooltip('Pause'));
+        await tester.pump();
+        await tester.tap(find.text('Leave Attempt'));
+        await tester.pump();
+      }
+      await tester.tap(find.text('Farmers Market').first);
+      await tester.pump();
+      expect(find.text('This activity is not yet available.'), findsOneWidget);
+      expect(find.text('Play'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

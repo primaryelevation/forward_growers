@@ -165,7 +165,14 @@ class _FarmSessionState extends State<FarmSession> with WidgetsBindingObserver {
     final preview = Farm(
       progress: dense
           ? progress
-          : progress.copyWith(expansion: 2, completed: {1, 2, 3, 4}),
+          : progress.copyWith(
+              expansion: 2,
+              completed: {
+                for (final activity in Activity.values)
+                  if (farm.balance.production(activity) != null)
+                    activity.index + 1,
+              },
+            ),
       store: _PreviewStore(),
       balance: farm.balance,
       clock: dense ? null : Stopwatch(),

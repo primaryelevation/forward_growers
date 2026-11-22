@@ -14,7 +14,19 @@ enum Activity {
   final String label;
 }
 
-enum Capacity { field, orchard }
+enum Capacity {
+  field('Field plots', 'plot', 'Plot'),
+  orchard('Apple trees', 'tree', 'Tree'),
+  dairy('Cow stalls', 'cow stall', 'Cow'),
+  chickens('Chicken nests', 'chicken nest', 'Nest'),
+  sheep('Sheep spaces', 'sheep space', 'Sheep'),
+  bees('Beehives', 'beehive', 'Hive');
+
+  const Capacity(this.label, this.purchaseLabel, this.targetLabel);
+  final String label;
+  final String purchaseLabel;
+  final String targetLabel;
+}
 
 enum Mode {
   relaxed('Relaxed Mode'),
@@ -35,7 +47,19 @@ enum Tool {
   hammer('Hammer'),
   noisemaker('Noisemaker'),
   dogWhistle('Dog Whistle'),
-  orchardWhistle('Orchard Whistle');
+  orchardWhistle('Orchard Whistle'),
+  feed('Feed'),
+  brush('Brush'),
+  milk('Milk'),
+  cleanNest('Clean Nest'),
+  collectEggs('Collect Eggs'),
+  shear('Shear'),
+  plantFlowers('Plant Flowers'),
+  smokeHive('Smoke Hive'),
+  collectHoney('Collect Honey'),
+  lasso('Lasso'),
+  farmDog('Farm Dog'),
+  shepherdsCrook('Shepherd’s Crook');
 
   const Tool(this.label);
   final String label;
@@ -48,6 +72,7 @@ typedef Production = ({
   Duration growth,
   int value,
   Capacity capacity,
+  (Tool, Tool, Tool, Tool) actions,
   HazardRule hazard,
 });
 
@@ -70,9 +95,20 @@ class GameBalance {
   static const _earningsScale = (5, 4);
   static const _priceScale = (27, 20);
   static const _bonus = (1, 4);
+  static const _producerCapacity = (start: 2, increment: 2, price: 35);
+  static const _fieldActions = (
+    Tool.plow,
+    Tool.plant,
+    Tool.water,
+    Tool.harvest,
+  );
   static const _capacities = {
     Capacity.field: (start: 4, increment: 4, price: 20),
     Capacity.orchard: (start: 2, increment: 2, price: 30),
+    Capacity.dairy: _producerCapacity,
+    Capacity.chickens: _producerCapacity,
+    Capacity.sheep: _producerCapacity,
+    Capacity.bees: _producerCapacity,
   };
 
   final Duration wheatGrowth;
@@ -89,29 +125,70 @@ class GameBalance {
       growth: wheatGrowth,
       value: 2,
       capacity: Capacity.field,
+      actions: _fieldActions,
       hazard: (label: 'Mole', tool: Tool.hammer, setback: Stage.bare),
     ),
     Activity.corn => (
       growth: const Duration(seconds: 5),
       value: 3,
       capacity: Capacity.field,
+      actions: _fieldActions,
       hazard: (label: 'Crow', tool: Tool.noisemaker, setback: Stage.prepared),
     ),
     Activity.carrots => (
       growth: const Duration(seconds: 4),
       value: 3,
       capacity: Capacity.field,
+      actions: _fieldActions,
       hazard: (label: 'Rabbit', tool: Tool.dogWhistle, setback: Stage.prepared),
     ),
     Activity.apples => (
       growth: const Duration(seconds: 5),
       value: 5,
       capacity: Capacity.orchard,
+      actions: (Tool.prune, Tool.fertilize, Tool.water, Tool.pick),
       hazard: (
         label: 'Squirrel',
         tool: Tool.orchardWhistle,
         setback: Stage.bare,
       ),
+    ),
+    Activity.dairy => (
+      growth: const Duration(seconds: 4),
+      value: 6,
+      capacity: Capacity.dairy,
+      actions: (Tool.feed, Tool.water, Tool.brush, Tool.milk),
+      hazard: (label: 'Loose cow', tool: Tool.lasso, setback: Stage.bare),
+    ),
+    Activity.chickens => (
+      growth: const Duration(seconds: 4),
+      value: 4,
+      capacity: Capacity.chickens,
+      actions: (Tool.feed, Tool.water, Tool.cleanNest, Tool.collectEggs),
+      hazard: (label: 'Fox', tool: Tool.farmDog, setback: Stage.bare),
+    ),
+    Activity.sheep => (
+      growth: const Duration(seconds: 5),
+      value: 7,
+      capacity: Capacity.sheep,
+      actions: (Tool.feed, Tool.water, Tool.brush, Tool.shear),
+      hazard: (
+        label: 'Escaped sheep',
+        tool: Tool.shepherdsCrook,
+        setback: Stage.bare,
+      ),
+    ),
+    Activity.bees => (
+      growth: const Duration(seconds: 5),
+      value: 6,
+      capacity: Capacity.bees,
+      actions: (
+        Tool.plantFlowers,
+        Tool.water,
+        Tool.smokeHive,
+        Tool.collectHoney,
+      ),
+      hazard: (label: 'Bear', tool: Tool.noisemaker, setback: Stage.bare),
     ),
     _ => null,
   };
@@ -191,10 +268,19 @@ class LevelDefinition {
   final BigInt? unitValue;
 
   bool get playable => production != null;
+  Capacity get capacity => production!.capacity;
   bool get orchard => production?.capacity == Capacity.orchard;
-  String get objectiveLabel =>
-      orchard ? 'Pick $objective harvests' : 'Harvest $objective crops';
-  Tool get prepare => orchard ? Tool.prune : Tool.plow;
-  Tool get tend => orchard ? Tool.fertilize : Tool.plant;
-  Tool get collect => orchard ? Tool.pick : Tool.harvest;
+  bool get field => production?.capacity == Capacity.field;
+  String get objectiveLabel => switch (activity) {
+    Activity.apples => 'Pick $objective harvests',
+    Activity.dairy => 'Collect milk $objective times',
+    Activity.chickens => 'Collect $objective egg batches',
+    Activity.sheep => 'Shear $objective times',
+    Activity.bees => 'Collect $objective jars of honey',
+    _ => 'Harvest $objective crops',
+  };
+  Tool get prepare => production!.actions.$1;
+  Tool get tend => production!.actions.$2;
+  Tool get beginProduction => production!.actions.$3;
+  Tool get collect => production!.actions.$4;
 }

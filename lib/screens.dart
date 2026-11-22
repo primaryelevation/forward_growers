@@ -73,7 +73,7 @@ class GameplayScreen extends StatelessWidget {
                     farm.feedback ??
                         (hazard == null
                             ? ''
-                            : '${rule.label} on ${level.orchard ? 'tree' : 'plot'} ${hazard.index + 1} · Use ${rule.tool.label}'),
+                            : '${rule.label} on ${level.capacity.targetLabel.toLowerCase()} ${hazard.index + 1} · Use ${rule.tool.label}'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700),
@@ -85,16 +85,24 @@ class GameplayScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     ActionRail(
-                      title: level.orchard ? 'Orchard' : 'Seeds',
+                      title: level.orchard
+                          ? 'Orchard'
+                          : level.field
+                          ? 'Seeds'
+                          : 'Supplies',
                       actions: [
                         if (level.orchard)
                           const Center(child: Icon(Icons.park, color: ink))
                         else
                           ActionTile(
                             farm: farm,
-                            action: Tool.plant,
-                            label: level.activity.label,
-                            icon: activityIcon(level.activity),
+                            action: level.field ? level.tend : level.prepare,
+                            label: level.field
+                                ? level.activity.label
+                                : level.prepare.label,
+                            icon: level.field
+                                ? activityIcon(level.activity)
+                                : toolIcon(level.prepare),
                           ),
                       ],
                     ),
@@ -103,9 +111,9 @@ class GameplayScreen extends StatelessWidget {
                       title: 'Tools',
                       actions: [
                         for (final tool in [
-                          level.prepare,
-                          if (level.orchard) level.tend,
-                          Tool.water,
+                          if (level.field || level.orchard) level.prepare,
+                          if (!level.field) level.tend,
+                          level.beginProduction,
                           level.collect,
                           rule.tool,
                         ])
@@ -145,9 +153,20 @@ IconData activityIcon(Activity activity) => switch (activity) {
 IconData toolIcon(Tool tool) => switch (tool) {
   Tool.plow => Icons.grass,
   Tool.prune => Icons.content_cut,
-  Tool.plant || Tool.fertilize => Icons.eco,
+  Tool.plant || Tool.fertilize || Tool.plantFlowers => Icons.eco,
   Tool.water => Icons.water_drop,
   Tool.pick || Tool.harvest => Icons.shopping_basket,
+  Tool.feed => Icons.restaurant,
+  Tool.brush => Icons.brush,
+  Tool.milk => Icons.local_drink,
+  Tool.cleanNest => Icons.cleaning_services,
+  Tool.collectEggs => Icons.egg_alt,
+  Tool.shear => Icons.content_cut,
+  Tool.smokeHive => Icons.air,
+  Tool.collectHoney => Icons.hexagon,
+  Tool.lasso => Icons.loop,
+  Tool.farmDog => Icons.pets,
+  Tool.shepherdsCrook => Icons.assistant_navigation,
   Tool.hammer => Icons.hardware,
   _ => Icons.campaign,
 };
@@ -463,39 +482,82 @@ class PlotTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final orchard = level.orchard;
-    final (label, icon, tint) = switch (plot.stage) {
-      Stage.bare => (
-        orchard ? 'Needs pruning' : 'Unplowed',
-        orchard ? Icons.park : Icons.landscape,
-        cream,
-      ),
-      Stage.prepared => (
-        orchard ? 'Pruned' : 'Plowed',
-        orchard ? Icons.content_cut : Icons.reorder,
-        cream,
-      ),
-      Stage.tended => (orchard ? 'Fertilized' : 'Planted', Icons.eco, cream),
-      Stage.growing => ('Growing', Icons.water_drop, const Color(0xffa8e2ff)),
-      Stage.ready => (
-        orchard ? 'Ready to pick' : 'Ready to harvest',
-        orchard ? Icons.circle : activityIcon(level.activity),
-        gold,
-      ),
+    final (label, icon, tint) = !level.field && !orchard
+        ? switch (plot.stage) {
+            Stage.bare => (
+              'Next: ${level.prepare.label}',
+              activityIcon(level.activity),
+              cream,
+            ),
+            Stage.prepared => (
+              'Next: ${level.tend.label}',
+              toolIcon(level.tend),
+              cream,
+            ),
+            Stage.tended => (
+              'Next: ${level.beginProduction.label}',
+              toolIcon(level.beginProduction),
+              cream,
+            ),
+            Stage.growing => (
+              'Producing…',
+              Icons.hourglass_top,
+              const Color(0xffa8e2ff),
+            ),
+            Stage.ready => (
+              'Ready: ${level.collect.label}',
+              toolIcon(level.collect),
+              gold,
+            ),
+          }
+        : switch (plot.stage) {
+            Stage.bare => (
+              orchard ? 'Needs pruning' : 'Unplowed',
+              orchard ? Icons.park : Icons.landscape,
+              cream,
+            ),
+            Stage.prepared => (
+              orchard ? 'Pruned' : 'Plowed',
+              orchard ? Icons.content_cut : Icons.reorder,
+              cream,
+            ),
+            Stage.tended => (
+              orchard ? 'Fertilized' : 'Planted',
+              Icons.eco,
+              cream,
+            ),
+            Stage.growing => (
+              'Growing',
+              Icons.water_drop,
+              const Color(0xffa8e2ff),
+            ),
+            Stage.ready => (
+              orchard ? 'Ready to pick' : 'Ready to harvest',
+              orchard ? Icons.circle : activityIcon(level.activity),
+              gold,
+            ),
+          };
+    final idleColor = switch (level.capacity) {
+      Capacity.field => soil,
+      Capacity.orchard => const Color(0xff325533),
+      Capacity.dairy => const Color(0xff714c49),
+      Capacity.chickens => const Color(0xff754b2b),
+      Capacity.sheep => const Color(0xff3e5e51),
+      Capacity.bees => const Color(0xff675221),
     };
     final rule = level.production!.hazard;
     final status = hazard ? '${rule.label} · ${rule.tool.label}' : label;
     return Semantics(
-      label: '${orchard ? 'Tree' : 'Plot'} ${index + 1}, $status',
+      label: '${level.capacity.targetLabel} ${index + 1}, $status',
       button: true,
       child: Material(
         color: hazard
             ? const Color(0xff833a29)
             : switch (plot.stage) {
-                Stage.bare => orchard ? const Color(0xff325533) : soil,
+                Stage.bare => idleColor,
                 Stage.growing => const Color(0xff426140),
                 Stage.ready => const Color(0xff80602a),
-                _ =>
-                  orchard ? const Color(0xff355c3f) : const Color(0xff603b2b),
+                _ => level.field ? const Color(0xff603b2b) : idleColor,
               },
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(dense ? 2 : 10),
@@ -510,7 +572,7 @@ class PlotTile extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (!dense && !orchard)
+              if (!dense && level.field)
                 CustomPaint(painter: Furrows(plowed: plot.stage != Stage.bare)),
               Center(
                 child: Padding(
@@ -940,17 +1002,16 @@ class _FarmMapState extends State<FarmMap> {
   Widget _capacityPanel(Farm farm, Capacity kind) {
     final count = farm.progress.capacity(kind);
     final limit = farm.capacityLimit(kind);
-    final field = kind == Capacity.field;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('${field ? 'Field plots' : 'Apple trees'}: $count / $limit'),
+        Text('${kind.label}: $count / $limit'),
         OutlinedButton(
           onPressed: farm.canBuy(kind) ? () => farm.buy(kind) : null,
           child: Text(
             count >= limit
                 ? 'Capacity reached'
-                : 'Buy ${field ? 'plot' : 'tree'} · \$${farm.price(kind)}',
+                : 'Buy ${kind.purchaseLabel} · \$${farm.price(kind)}',
           ),
         ),
       ],

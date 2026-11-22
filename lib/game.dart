@@ -91,13 +91,7 @@ class Farm extends ChangeNotifier {
   Future<void> buy(Capacity kind) async {
     if (!canBuy(kind)) return;
     final count = progress.capacity(kind) + 1;
-    await _commit(
-      progress.copyWith(
-        money: cash - price(kind),
-        fieldPlots: kind == Capacity.field ? count : null,
-        appleTrees: kind == Capacity.orchard ? count : null,
-      ),
-    );
+    await _commit(progress.withPurchase(kind, count, cash - price(kind)));
   }
 
   Future<void> setMode(Mode next) async {
@@ -202,7 +196,8 @@ class Farm extends ChangeNotifier {
       _plots[index] = (stage: Stage.prepared, readyAt: null);
     } else if (plot.stage == Stage.prepared && selection == level.tend) {
       _plots[index] = (stage: Stage.tended, readyAt: null);
-    } else if (plot.stage == Stage.tended && selection == Tool.water) {
+    } else if (plot.stage == Stage.tended &&
+        selection == level.beginProduction) {
       _plots[index] = (
         stage: Stage.growing,
         readyAt: _elapsed + level.production!.growth,
@@ -214,10 +209,10 @@ class Farm extends ChangeNotifier {
       _hint(switch (plot.stage) {
         Stage.bare => '${level.prepare.label} first.',
         Stage.prepared =>
-          level.orchard
-              ? 'Fertilize first.'
-              : 'Select ${level.activity.label} and plant.',
-        Stage.tended => 'Water first.',
+          level.field
+              ? 'Select ${level.activity.label} and plant.'
+              : 'Select ${level.tend.label}.',
+        Stage.tended => 'Select ${level.beginProduction.label}.',
         Stage.growing => 'Still growing.',
         Stage.ready => 'Select ${level.collect.label}.',
       });
