@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,7 +17,8 @@ Future<void> main() async {
 }
 
 class ForwardGrowers extends StatelessWidget {
-  const ForwardGrowers({super.key});
+  const ForwardGrowers({super.key, this.roundClock});
+  final Stopwatch? roundClock;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -32,31 +34,41 @@ class ForwardGrowers extends StatelessWidget {
         ),
       ),
     ),
-    home: const FarmSession(),
+    home: FarmSession(roundClock: roundClock),
   );
 }
 
 class FarmSession extends StatefulWidget {
-  const FarmSession({super.key});
+  const FarmSession({super.key, this.preview = false, this.roundClock});
+
+  final bool preview;
+  final Stopwatch? roundClock;
 
   @override
   State<FarmSession> createState() => _FarmSessionState();
 }
 
 class _FarmSessionState extends State<FarmSession> with WidgetsBindingObserver {
-  final farm = Farm();
+  late final Farm farm;
   Timer? timer;
+  bool get isPreview => kDebugMode && widget.preview;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    farm.addListener(syncClock);
+    farm = isPreview
+        ? Farm.preview()
+        : Farm.timed(widget.roundClock ?? Stopwatch());
+    if (!isPreview) farm.addListener(syncClock);
   }
 
   void syncClock() {
     if (farm.phase == Phase.playing) {
-      timer ??= Timer.periodic(const Duration(seconds: 1), (_) => farm.tick());
+      timer ??= Timer.periodic(
+        const Duration(milliseconds: 50),
+        (_) => farm.tick(),
+      );
     } else {
       timer?.cancel();
       timer = null;
@@ -65,7 +77,7 @@ class _FarmSessionState extends State<FarmSession> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) farm.pause();
+    if (!isPreview && state != AppLifecycleState.resumed) farm.pause();
   }
 
   @override
@@ -76,14 +88,29 @@ class _FarmSessionState extends State<FarmSession> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  void openPreview() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const FarmSession(preview: true)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
       child: ListenableBuilder(
         listenable: farm,
         builder: (context, _) => farm.phase == Phase.results
-            ? ResultsScreen(farm: farm)
-            : GameplayScreen(farm: farm),
+            ? ResultsScreen(
+                farm: farm,
+                onPreview: kDebugMode ? openPreview : null,
+              )
+            : GameplayScreen(
+                farm: farm,
+                onPreview: kDebugMode && !isPreview ? openPreview : null,
+                onExitPreview: isPreview
+                    ? () => Navigator.of(context).pop()
+                    : null,
+              ),
       ),
     ),
   );

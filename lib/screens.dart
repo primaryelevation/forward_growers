@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'game.dart';
@@ -11,8 +12,15 @@ const gold = Color(0xffffca55);
 const soil = Color(0xff805033);
 
 class GameplayScreen extends StatelessWidget {
-  const GameplayScreen({super.key, required this.farm});
+  const GameplayScreen({
+    super.key,
+    required this.farm,
+    this.onPreview,
+    this.onExitPreview,
+  });
   final Farm farm;
+  final VoidCallback? onPreview;
+  final VoidCallback? onExitPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -40,11 +48,18 @@ class GameplayScreen extends StatelessWidget {
                     ),
                     Expanded(child: HudItem('TIME', '${time ~/ 60}:$seconds')),
                     Expanded(child: HudItem('CASH', '\$${farm.cash}')),
-                    IconButton(
-                      tooltip: 'Pause',
-                      onPressed: farm.pause,
-                      icon: const Icon(Icons.pause_rounded),
-                    ),
+                    if (onExitPreview != null)
+                      TextButton.icon(
+                        onPressed: onExitPreview,
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text('Exit Preview'),
+                      )
+                    else
+                      IconButton(
+                        tooltip: 'Pause',
+                        onPressed: farm.pause,
+                        icon: const Icon(Icons.pause_rounded),
+                      ),
                   ],
                 ),
               ),
@@ -90,7 +105,8 @@ class GameplayScreen extends StatelessWidget {
             ],
           ),
         ),
-        if (farm.phase != Phase.playing) RoundOverlay(farm: farm),
+        if (farm.phase != Phase.playing)
+          RoundOverlay(farm: farm, onPreview: onPreview),
       ],
     );
   }
@@ -139,7 +155,7 @@ class ActionRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 92,
+    width: MediaQuery.sizeOf(context).width < 650 ? 80 : 92,
     child: Material(
       color: cream,
       borderRadius: BorderRadius.circular(16),
@@ -223,46 +239,138 @@ class ActionTile extends StatelessWidget {
   }
 }
 
-class PlotGrid extends StatelessWidget {
+class PlotGrid extends StatefulWidget {
   const PlotGrid({super.key, required this.farm});
   final Farm farm;
 
   @override
+  State<PlotGrid> createState() => _PlotGridState();
+}
+
+class _PlotGridState extends State<PlotGrid> {
+  final _transform = TransformationController();
+  final _pointers = <int>{};
+  Offset? _tapOrigin;
+  bool _isGesture = false;
+
+  @override
+  void dispose() {
+    _transform.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final farm = widget.farm;
     final plots = farm.plots;
-    final columns = plots.length == 4 ? 2 : 3;
+    final columns = math.sqrt(plots.length).ceil();
+    final rows = (plots.length / columns).ceil();
+    final dense = columns >= 8;
+    final gap = dense
+        ? 1.5
+        : columns >= 4
+        ? 4.0
+        : 8.0;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      child: LayoutBuilder(
-        builder: (context, box) {
-          final width = math.min(620.0, box.maxWidth);
-          final tileWidth = (width - (columns - 1) * 8) / columns;
-          final tileHeight = (box.maxHeight - 8) / 2;
-          return Center(
-            child: SizedBox(
-              width: width,
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (var i = 0; i < plots.length; i++)
-                    SizedBox(
-                      width: tileWidth,
-                      height: tileHeight,
-                      child: PlotTile(
-                        index: i,
-                        plot: plots[i],
-                        mole: farm.mole == i,
-                        onTap: () => farm.tap(i),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Listener(
+              onPointerDown: (event) {
+                if (_pointers.isEmpty) {
+                  _tapOrigin = event.position;
+                  _isGesture = false;
+                } else {
+                  _isGesture = true;
+                }
+                _pointers.add(event.pointer);
+              },
+              onPointerMove: (event) {
+                if ((event.position - _tapOrigin!).distance > 8) {
+                  _isGesture = true;
+                }
+              },
+              onPointerUp: (event) => _pointers.remove(event.pointer),
+              onPointerCancel: (event) {
+                _isGesture = true;
+                _pointers.remove(event.pointer);
+              },
+              child: InteractiveViewer(
+                transformationController: _transform,
+                maxScale: 8,
+                child: Column(
+                  children: [
+                    for (var row = 0; row < rows; row++) ...[
+                      if (row > 0) SizedBox(height: gap),
+                      Expanded(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (
+                              var column = 0;
+                              column < columns;
+                              column++
+                            ) ...[
+                              if (column > 0) SizedBox(width: gap),
+                              Expanded(
+                                child: _cell(
+                                  farm,
+                                  plots,
+                                  row * columns + column,
+                                  dense,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                    ],
+                  ],
+                ),
               ),
             ),
-          );
-        },
+            Positioned(
+              top: 4,
+              right: 4,
+              child: ValueListenableBuilder(
+                valueListenable: _transform,
+                builder: (context, matrix, _) {
+                  if (matrix.isIdentity()) return const SizedBox.shrink();
+                  return FilledButton(
+                    onPressed: () => _transform.value = Matrix4.identity(),
+                    child: const Text('Full Field'),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _cell(Farm farm, List<Plot> plots, int index, bool dense) {
+    if (index >= plots.length) {
+      return const DecoratedBox(
+        decoration: BoxDecoration(
+          color: Color(0x25325230),
+          borderRadius: BorderRadius.all(Radius.circular(3)),
+        ),
+      );
+    }
+    final mole = farm.mole == index;
+    return PlotTile(
+      key: ValueKey(index),
+      index: index,
+      plot: plots[index],
+      mole: mole,
+      ruined: mole && farm.moleRuined,
+      dense: dense,
+      onTap: () {
+        if (!_isGesture) farm.tap(index);
+      },
     );
   }
 }
@@ -273,11 +381,15 @@ class PlotTile extends StatelessWidget {
     required this.index,
     required this.plot,
     required this.mole,
+    required this.ruined,
+    required this.dense,
     required this.onTap,
   });
   final int index;
   final Plot plot;
   final bool mole;
+  final bool ruined;
+  final bool dense;
   final VoidCallback onTap;
 
   @override
@@ -301,16 +413,29 @@ class PlotTile extends StatelessWidget {
       ),
       Stage.ready => ('${plot.crop!.label} ready', cropIcon(plot.crop!), gold),
     };
+    final status = ruined
+        ? 'Crop ruined · Hammer'
+        : mole
+        ? 'Mole threat · Hammer'
+        : label;
+    final moleColor = ruined ? const Color(0xffffa194) : gold;
     return Semantics(
-      label: 'Plot ${index + 1}',
+      label: 'Plot ${index + 1}, $status',
       button: true,
       child: Material(
-        color: plot.stage == Stage.unplowed ? soil : const Color(0xff603b2b),
+        color: ruined
+            ? const Color(0xff733833)
+            : switch (plot.stage) {
+                Stage.unplowed => soil,
+                Stage.growing => const Color(0xff426140),
+                Stage.ready => const Color(0xff80602a),
+                _ => const Color(0xff603b2b),
+              },
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(dense ? 2 : 10),
           side: BorderSide(
-            color: mole ? gold : const Color(0xffa5744e),
-            width: 3,
+            color: mole ? moleColor : const Color(0xffa5744e),
+            width: dense ? 1 : 2,
           ),
         ),
         clipBehavior: Clip.antiAlias,
@@ -319,29 +444,35 @@ class PlotTile extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              CustomPaint(
-                painter: Furrows(plowed: plot.stage != Stage.unplowed),
-              ),
+              if (!dense)
+                CustomPaint(
+                  painter: Furrows(plowed: plot.stage != Stage.unplowed),
+                ),
               Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(6),
+                  padding: EdgeInsets.all(dense ? 1 : 4),
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Column(
                       children: [
                         Icon(
-                          mole ? Icons.pets : icon,
-                          color: mole ? gold : tint,
+                          ruined
+                              ? Icons.warning_rounded
+                              : mole
+                              ? Icons.pets
+                              : icon,
+                          color: mole ? moleColor : tint,
                           size: 29,
                         ),
-                        Text(
-                          mole ? 'Mole! Use Hammer' : label,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 14,
+                        if (!dense)
+                          Text(
+                            status,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -386,8 +517,9 @@ class Furrows extends CustomPainter {
 }
 
 class RoundOverlay extends StatelessWidget {
-  const RoundOverlay({super.key, required this.farm});
+  const RoundOverlay({super.key, required this.farm, this.onPreview});
   final Farm farm;
+  final VoidCallback? onPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -431,6 +563,8 @@ class RoundOverlay extends StatelessWidget {
                       Text(message, textAlign: TextAlign.center),
                       const SizedBox(height: 12),
                       FilledButton(onPressed: onPressed, child: Text(button)),
+                      if (kDebugMode && onPreview != null)
+                        PreviewButton(onPressed: onPreview!),
                     ],
                   ),
                 ),
@@ -444,8 +578,9 @@ class RoundOverlay extends StatelessWidget {
 }
 
 class ResultsScreen extends StatelessWidget {
-  const ResultsScreen({super.key, required this.farm});
+  const ResultsScreen({super.key, required this.farm, this.onPreview});
   final Farm farm;
+  final VoidCallback? onPreview;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -480,69 +615,73 @@ class ResultsScreen extends StatelessWidget {
                       ),
                       HudItem('CASH', '\$${farm.cash}'),
                       const SizedBox(width: 12),
-                      HudItem('PLOTS', '${farm.plots.length} / 6'),
+                      HudItem('PLOTS', '${farm.plotCount} / $maxPlots'),
                     ],
                   ),
                 ),
               ),
+              if (!farm.hasNext) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'All $finalLevel Levels Complete',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ],
+              const SizedBox(height: 8),
+              Text('Farm Shop', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children:
+                    [
+                          ShopCard(
+                            title: 'New plot',
+                            icon: Icons.grid_view,
+                            detail: 'One more growing plot',
+                            button: farm.plotCount == maxPlots
+                                ? 'Plot limit'
+                                : 'Buy Plot · \$$plotPrice',
+                            onBuy: farm.canBuyPlot ? farm.buyPlot : null,
+                          ),
+                          const ShopCard(
+                            title: 'Wheat',
+                            icon: Icons.grass,
+                            detail: 'Unlimited seeds',
+                            button: 'Owned',
+                          ),
+                          ShopCard(
+                            title: 'Corn',
+                            icon: Icons.eco,
+                            detail: 'Permanent seed unlock',
+                            button: farm.owns(Crop.corn)
+                                ? 'Owned'
+                                : 'Buy · \$${Crop.corn.price}',
+                            onBuy: farm.canBuyCrop(Crop.corn)
+                                ? () => farm.buyCrop(Crop.corn)
+                                : null,
+                          ),
+                          const ShopCard(
+                            title: 'Carrots',
+                            icon: Icons.lock_outline,
+                            detail: 'Unavailable',
+                            button: 'Locked',
+                          ),
+                        ]
+                        .map(
+                          (card) => SizedBox(
+                            width: box.maxWidth >= 520
+                                ? (box.maxWidth - 48) / 4
+                                : (box.maxWidth - 32) / 2,
+                            child: card,
+                          ),
+                        )
+                        .toList(),
+              ),
               if (farm.hasNext) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Farm Shop',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children:
-                      [
-                            ShopCard(
-                              title: 'New plot',
-                              icon: Icons.grid_view,
-                              detail: 'One more growing plot',
-                              button: farm.plots.length == 6
-                                  ? 'Plot limit'
-                                  : 'Buy · \$20',
-                              onBuy: farm.canBuyPlot ? farm.buyPlot : null,
-                            ),
-                            const ShopCard(
-                              title: 'Wheat',
-                              icon: Icons.grass,
-                              detail: 'Unlimited seeds',
-                              button: 'Owned',
-                            ),
-                            ShopCard(
-                              title: 'Corn',
-                              icon: Icons.eco,
-                              detail: 'Permanent seed unlock',
-                              button: farm.owns(Crop.corn)
-                                  ? 'Owned'
-                                  : 'Buy · \$${Crop.corn.price}',
-                              onBuy: farm.canBuyCrop(Crop.corn)
-                                  ? () => farm.buyCrop(Crop.corn)
-                                  : null,
-                            ),
-                            const ShopCard(
-                              title: 'Carrots',
-                              icon: Icons.lock_outline,
-                              detail: 'Unlocks at Level 5',
-                              button: 'Locked',
-                            ),
-                          ]
-                          .map(
-                            (card) => SizedBox(
-                              width: box.maxWidth >= 520
-                                  ? (box.maxWidth - 48) / 4
-                                  : (box.maxWidth - 32) / 2,
-                              child: card,
-                            ),
-                          )
-                          .toList(),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Next objective · Harvest ${levels[farm.level]} crops',
+                  'Next objective · Harvest ${harvestTarget(farm.level + 1)} crops',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 4),
@@ -550,18 +689,25 @@ class ResultsScreen extends StatelessWidget {
                   onPressed: farm.restart,
                   child: Text('Play Level ${farm.level + 1}'),
                 ),
-              ] else ...[
-                const SizedBox(height: 16),
-                Text(
-                  'Prototype Complete',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
               ],
+              if (kDebugMode && onPreview != null)
+                PreviewButton(onPressed: onPreview!),
             ],
           ),
         ),
       ),
     ),
+  );
+}
+
+class PreviewButton extends StatelessWidget {
+  const PreviewButton({super.key, required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => OutlinedButton(
+    onPressed: onPressed,
+    child: const Text('Preview 16 × 16 Field'),
   );
 }
 

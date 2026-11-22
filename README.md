@@ -1,8 +1,8 @@
 # Forward Growers
 
-A two-level landscape farming game for Android and iOS. Plow the soil, plant
-wheat, water it, then harvest when ready. Use the hammer on a plot with a mole
-before it destroys the crop.
+A 32-level landscape farming game for Android and iOS. Plow the soil, plant
+wheat, water it, then harvest when ready. Hammer a mole within two seconds to
+save the crop. After that, hammer it to clear the damaged plot, then plow again.
 
 ## Run locally
 
@@ -12,26 +12,29 @@ Android emulator or iOS simulator, or connect a device.
 ```sh
 flutter pub get
 flutter devices
-flutter run -d DEVICE_ID
+flutter run --debug -d DEVICE_ID
 ```
 
 Replace `DEVICE_ID` with an ID listed by `flutter devices`. A physical iOS
 device requires a development team configured in Xcode.
 
-## Play the prototype
+## Play and preview
 
-Harvest three crops in Level 1 and five in Level 2. Each level gives you two
-minutes of active play. The farm shop between levels sells a permanent corn
-unlock and up to two extra plots. You can start Level 2 without a purchase.
-Failed attempts preserve earned cash, so retries can fund both plot upgrades
-even though a perfect first attempt earns only $12.
+Harvest 3 crops in Level 1, then 2 more per level through 65 in Level 32.
+Each round gives you two minutes of active play. Every extra plot costs $20,
+and you can own up to 256. Corn is a permanent unlock. Cash, purchased plots,
+and unlocked crops carry into later rounds and retries within the app session.
 
-Farm progress lasts for the current app session.
+In a debug build, select **Preview 16 × 16 Field** from the opening
+instructions, pause overlay, or results screen. The preview has its own field
+and a fixed clock for inspecting sample crop stages. Pinch to zoom and drag to
+pan. Tap **Full Field** to reset the view and **Exit Preview** to return to
+your farm.
 
 ## Validate
 
 ```sh
-dart format .
+dart format lib test
 flutter analyze
 flutter test
 ```
