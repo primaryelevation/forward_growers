@@ -40,7 +40,7 @@ void main() {
       expect(find.text('TIME'), findsNothing);
 
       Future<void> apply(String action) async {
-        await tester.tap(find.text(action).last);
+        await tester.tap(find.byTooltip(action));
         await tester.pump();
         for (var i = 0; i < balance.level(1, 1).objective; i++) {
           await tester.tap(plots.at(i));
@@ -49,7 +49,7 @@ void main() {
       }
 
       await apply('Plow');
-      await apply('Wheat');
+      await apply('Plant Wheat');
       await apply('Water');
       await tester.pump(balance.level(1, 1).production!.growth);
       expect(find.text('Ready to harvest'), findsNWidgets(3));
@@ -107,7 +107,7 @@ void main() {
       'Pick',
       'Orchard Whistle',
     ]) {
-      expect(find.text(tool).hitTestable(), findsWidgets);
+      expect(find.byTooltip(tool).hitTestable(), findsOneWidget);
     }
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -262,13 +262,10 @@ void main() {
           collect,
           level.production!.hazard.tool,
         ]) {
-          expect(
-            find.widgetWithText(ActionTile, tool.label).hitTestable(),
-            findsOneWidget,
-          );
+          expect(find.byTooltip(tool.label).hitTestable(), findsOneWidget);
         }
         for (final tool in [first, second, third, collect]) {
-          await tester.tap(find.widgetWithText(ActionTile, tool.label));
+          await tester.tap(find.byTooltip(tool.label));
           await tester.pump();
           await tester.tap(tiles.first);
           await tester.pump();
@@ -317,9 +314,14 @@ void main() {
 
       Future<void> apply(Tool tool, Finder tile) async {
         final label = tool == Tool.plant
-            ? farm.level.activity.label
+            ? 'Plant ${farm.level.activity.label}'
             : tool.label;
-        await tester.tap(find.widgetWithText(ActionTile, label));
+        final action = find.byTooltip(label);
+        if (action.hitTestable().evaluate().isEmpty) {
+          await tester.ensureVisible(action);
+          await tester.pump();
+        }
+        await tester.tap(action);
         await tester.pump();
         await tester.tap(tile);
         await tester.pump();

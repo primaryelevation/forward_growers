@@ -83,65 +83,26 @@ class GameplayScreen extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    ActionRail(
-                      title: orderRules != null
-                          ? 'Orders'
-                          : level.orchard
-                          ? 'Orchard'
-                          : level.field
-                          ? 'Seeds'
-                          : 'Supplies',
-                      actions: [
-                        if (orderRules != null) ...[
-                          for (final tool in orderRules.steps.take(2))
-                            ActionTile(
-                              farm: farm,
-                              action: tool,
-                              label: tool.label,
-                              icon: toolIcon(tool),
-                            ),
-                        ] else if (level.orchard)
-                          const Center(child: Icon(Icons.park, color: ink))
-                        else
-                          ActionTile(
-                            farm: farm,
-                            action: level.field ? level.tend : level.prepare,
-                            label: level.field
-                                ? level.activity.label
-                                : level.prepare.label,
-                            icon: level.field
-                                ? activityIcon(level.activity)
-                                : toolIcon(level.prepare),
-                          ),
-                      ],
-                    ),
-                    Expanded(child: PlotGrid(farm: farm)),
-                    ActionRail(
-                      title: 'Tools',
-                      actions: [
-                        for (final tool in [
-                          if (orderRules != null)
-                            ...orderRules.steps.skip(2)
-                          else ...[
-                            if (level.field || level.orchard) level.prepare,
-                            if (!level.field) level.tend,
-                            level.beginProduction,
-                            level.collect,
-                          ],
-                          rule.tool,
-                        ])
-                          ActionTile(
-                            farm: farm,
-                            action: tool,
-                            label: tool.label,
-                            icon: toolIcon(tool),
-                          ),
-                      ],
-                    ),
-                  ],
+                child: LayoutBuilder(
+                  builder: (context, bounds) => Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: PlotGrid(farm: farm)),
+                      ToolsPanel(
+                        farm: farm,
+                        width: bounds.maxWidth < 650 ? 126 : 154,
+                        actions:
+                            orderRules?.steps ??
+                            [
+                              level.prepare,
+                              level.tend,
+                              level.beginProduction,
+                              level.collect,
+                            ],
+                        hazardTool: rule.tool,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -229,88 +190,189 @@ class HudItem extends StatelessWidget {
   );
 }
 
-class ActionRail extends StatelessWidget {
-  const ActionRail({super.key, required this.title, required this.actions});
-  final String title;
-  final List<Widget> actions;
+class ToolsPanel extends StatelessWidget {
+  const ToolsPanel({
+    super.key,
+    required this.farm,
+    required this.actions,
+    required this.hazardTool,
+    required this.width,
+  });
+
+  final Farm farm;
+  final List<Tool> actions;
+  final Tool hazardTool;
+  final double width;
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: MediaQuery.sizeOf(context).width < 650 ? 96 : 110,
+    width: width,
     child: Material(
       color: cream,
       borderRadius: BorderRadius.circular(16),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final tileHeight = ((constraints.maxHeight - 30) / actions.length)
-              .clamp(36.0, 57.0);
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(5, 4, 5, 4),
-            children: [
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              for (final action in actions)
-                SizedBox(height: tileHeight, child: action),
-            ],
-          );
-        },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(5, 3, 5, 3),
+        child: LayoutBuilder(
+          builder: (context, bounds) {
+            const headingHeight = 17.0;
+            const gap = 2.0;
+            final count = actions.length + 1;
+            final fittingSize =
+                (bounds.maxHeight - headingHeight - gap * (count - 1)) / count;
+            final tileSize = fittingSize.clamp(40.0, (bounds.maxWidth - 4) / 2);
+            const headingStyle = TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            );
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      const SizedBox(
+                        height: headingHeight,
+                        child: Text('Standard', style: headingStyle),
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            children: [
+                              for (
+                                var index = 0;
+                                index < actions.length;
+                                index++
+                              ) ...[
+                                if (index > 0) const SizedBox(height: gap),
+                                ActionTile(
+                                  farm: farm,
+                                  action: actions[index],
+                                  size: tileSize,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: gap),
+                      ActionTile(
+                        farm: farm,
+                        action: hazardTool,
+                        size: tileSize,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Expanded(
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        height: headingHeight,
+                        child: Text('Special', style: headingStyle),
+                      ),
+                      Text('None', style: TextStyle(fontSize: 11, color: ink)),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     ),
   );
 }
+
+({String name, String file})? _illustration(Tool tool, Activity activity) =>
+    switch (tool) {
+      Tool.plow => (name: 'Plow', file: 'plow'),
+      Tool.plant => switch (activity) {
+        Activity.wheat => (name: 'Plant Wheat', file: 'plant_wheat'),
+        Activity.corn => (name: 'Plant Corn', file: 'plant_corn'),
+        Activity.carrots => (name: 'Plant Carrots', file: 'plant_carrots'),
+        _ => null,
+      },
+      Tool.water => (name: 'Water', file: 'water'),
+      Tool.harvest => (name: 'Harvest', file: 'harvest'),
+      Tool.hammer => (name: 'Hammer', file: 'hammer'),
+      Tool.noisemaker => (name: 'Noisemaker', file: 'noisemaker'),
+      Tool.dogWhistle => (name: 'Dog Whistle', file: 'dog_whistle'),
+      _ => null,
+    };
 
 class ActionTile extends StatelessWidget {
   const ActionTile({
     super.key,
     required this.farm,
     required this.action,
-    required this.label,
-    required this.icon,
+    required this.size,
   });
+
   final Farm farm;
   final Tool action;
-  final String label;
-  final IconData icon;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     final selected = action == farm.selection;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+    final illustration = _illustration(action, farm.level.activity);
+    final label = illustration?.name ?? action.label;
+    void select() => farm.select(action);
+
+    return SizedBox.square(
+      dimension: size,
       child: Semantics(
+        button: true,
         selected: selected,
-        child: Material(
-          color: selected ? const Color(0xff285333) : const Color(0xffe2ecc9),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: BorderSide(
-              color: selected ? gold : Colors.transparent,
-              width: 3,
+        label: label,
+        onTap: select,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: label,
+          excludeFromSemantics: true,
+          child: Material(
+            color: selected ? gold : const Color(0xffe2ecc9),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(7),
+              side: BorderSide(
+                color: selected
+                    ? const Color(0xff245232)
+                    : const Color(0xffb5a477),
+                width: selected ? 3 : 1,
+              ),
             ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => farm.select(action),
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(
-                  children: [
-                    Icon(icon, size: 16, color: selected ? gold : ink),
-                    const SizedBox(width: 3),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: selected ? Colors.white : ink,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: select,
+              child: Padding(
+                padding: EdgeInsets.all(selected ? 4 : 2),
+                child: illustration == null
+                    ? Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(toolIcon(action), size: 15, color: ink),
+                          Flexible(
+                            child: Text(
+                              label,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 9,
+                                height: 1,
+                                fontWeight: FontWeight.w800,
+                                color: ink,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Image.asset(
+                        'assets/tools/${illustration.file}.png',
+                        fit: BoxFit.contain,
+                        excludeFromSemantics: true,
                       ),
-                    ),
-                  ],
-                ),
               ),
             ),
           ),

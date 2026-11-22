@@ -19,3 +19,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/tools/plow.png
+    - assets/tools/plant_wheat.png
+    - assets/tools/plant_corn.png
+    - assets/tools/plant_carrots.png
+    - assets/tools/water.png
+    - assets/tools/harvest.png
+    - assets/tools/hammer.png
+    - assets/tools/noisemaker.png
+    - assets/tools/dog_whistle.png
