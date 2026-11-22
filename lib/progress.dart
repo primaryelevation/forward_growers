@@ -23,7 +23,8 @@ class FarmProgress {
     completed: {},
   );
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
+  static const _producerVersion = 2;
   static const _legacyVersion = 1;
   static final _decimalWallet = RegExp(r'^[0-9]+$');
   final BigInt money;
@@ -45,9 +46,16 @@ class FarmProgress {
         completed: completed,
       );
 
-  int get highestUnlocked {
-    for (var position = 1; position <= Activity.values.length; position++) {
-      if (!completed.contains(position)) return position;
+  bool get hasBlueRibbon => completed.any(
+    (number) => (number - 1) % Activity.values.length == Activity.fair.index,
+  );
+
+  int get highestUnlocked => unlockedIn(expansion);
+
+  int unlockedIn(int expansion) {
+    final offset = (expansion - 1) * Activity.values.length;
+    for (var position = 1; position < Activity.values.length; position++) {
+      if (!completed.contains(offset + position)) return position;
     }
     return Activity.values.length;
   }
@@ -95,7 +103,9 @@ class FarmProgress {
       throw const FormatException('Invalid farm save');
     }
     final version = data['version'];
-    if (version != schemaVersion && version != _legacyVersion) {
+    if (version != schemaVersion &&
+        version != _producerVersion &&
+        version != _legacyVersion) {
       throw const FormatException('Unsupported save version');
     }
     final wallet = data['money'];
@@ -115,7 +125,7 @@ class FarmProgress {
         expansion is! int ||
         field is! int ||
         trees is! int ||
-        (version == schemaVersion && producers is! Map<String, dynamic>) ||
+        (version != _legacyVersion && producers is! Map<String, dynamic>) ||
         activities is! List ||
         mode == null) {
       throw const FormatException('Invalid farm progress');
@@ -126,6 +136,8 @@ class FarmProgress {
         final count = switch (kind) {
           Capacity.field => field,
           Capacity.orchard => trees,
+          Capacity.tables when version != schemaVersion =>
+            balance.startingCapacity(kind),
           _ when version == _legacyVersion => balance.startingCapacity(kind),
           _ => (producers as Map<String, dynamic>)[kind.name],
         };
@@ -139,13 +151,28 @@ class FarmProgress {
     } on RangeError {
       throw const FormatException('Invalid farm capacity');
     }
+    final offset = balance.firstLevel(expansion) - 1;
+    final lastLevel = offset + Activity.values.length;
     final completed = <int>{};
     for (final activity in activities) {
       if (activity is! int ||
           activity < 1 ||
-          activity > Activity.values.length ||
-          !completed.add(activity)) {
+          activity >
+              (version == schemaVersion
+                  ? lastLevel
+                  : Activity.bees.index + 1)) {
         throw const FormatException('Invalid completed activities');
+      }
+      if (!completed.add(
+        version == schemaVersion ? activity : offset + activity,
+      )) {
+        throw const FormatException('Duplicate completed activity');
+      }
+    }
+    for (final number in completed) {
+      if ((number - 1) % Activity.values.length != 0 &&
+          !completed.contains(number - 1)) {
+        throw const FormatException('Invalid activity sequence');
       }
     }
     final progress = FarmProgress(
@@ -155,10 +182,7 @@ class FarmProgress {
       mode: mode,
       completed: completed,
     );
-    final sequential =
-        completed.length == Activity.values.length ||
-        completed.length == progress.highestUnlocked - 1;
-    if (!sequential || data['highestUnlocked'] != progress.highestUnlocked) {
+    if (data['highestUnlocked'] != progress.highestUnlocked) {
       throw const FormatException('Invalid activity sequence');
     }
     return progress;

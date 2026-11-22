@@ -168,9 +168,12 @@ class _FarmSessionState extends State<FarmSession> with WidgetsBindingObserver {
           : progress.copyWith(
               expansion: 2,
               completed: {
-                for (final activity in Activity.values)
-                  if (farm.balance.production(activity) != null)
-                    activity.index + 1,
+                for (
+                  var number = 1;
+                  number < farm.balance.firstLevel(3);
+                  number++
+                )
+                  number,
               },
             ),
       store: _PreviewStore(),

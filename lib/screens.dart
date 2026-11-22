@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'balance.dart';
 import 'game.dart';
+import 'orders.dart';
 
 const grass = Color(0xff80ad61);
 const cream = Color(0xfffff2d2);
@@ -20,7 +21,8 @@ class GameplayScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final level = farm.level;
-    final rule = level.production!.hazard;
+    final rule = level.hazard;
+    final orderRules = level.orders;
     final time = farm.remaining;
     final hazard = farm.hazard;
     return Stack(
@@ -85,13 +87,23 @@ class GameplayScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     ActionRail(
-                      title: level.orchard
+                      title: orderRules != null
+                          ? 'Orders'
+                          : level.orchard
                           ? 'Orchard'
                           : level.field
                           ? 'Seeds'
                           : 'Supplies',
                       actions: [
-                        if (level.orchard)
+                        if (orderRules != null) ...[
+                          for (final tool in orderRules.steps.take(2))
+                            ActionTile(
+                              farm: farm,
+                              action: tool,
+                              label: tool.label,
+                              icon: toolIcon(tool),
+                            ),
+                        ] else if (level.orchard)
                           const Center(child: Icon(Icons.park, color: ink))
                         else
                           ActionTile(
@@ -111,10 +123,14 @@ class GameplayScreen extends StatelessWidget {
                       title: 'Tools',
                       actions: [
                         for (final tool in [
-                          if (level.field || level.orchard) level.prepare,
-                          if (!level.field) level.tend,
-                          level.beginProduction,
-                          level.collect,
+                          if (orderRules != null)
+                            ...orderRules.steps.skip(2)
+                          else ...[
+                            if (level.field || level.orchard) level.prepare,
+                            if (!level.field) level.tend,
+                            level.beginProduction,
+                            level.collect,
+                          ],
                           rule.tool,
                         ])
                           ActionTile(
@@ -167,6 +183,14 @@ IconData toolIcon(Tool tool) => switch (tool) {
   Tool.lasso => Icons.loop,
   Tool.farmDog => Icons.pets,
   Tool.shepherdsCrook => Icons.assistant_navigation,
+  Tool.takeOrder => Icons.receipt_long,
+  Tool.gather => Icons.shopping_basket,
+  Tool.weigh => Icons.scale,
+  Tool.pack => Icons.inventory_2,
+  Tool.deliver => Icons.local_shipping,
+  Tool.collectMoney => Icons.payments,
+  Tool.broom => Icons.cleaning_services,
+  Tool.tarp => Icons.umbrella,
   Tool.hammer => Icons.hardware,
   _ => Icons.campaign,
 };
@@ -307,10 +331,7 @@ class PlotGrid extends StatefulWidget {
 class _PlotGridState extends State<PlotGrid> {
   final _transform = TransformationController();
   final _viewport = GlobalKey();
-  late final _cells = List.generate(
-    widget.farm.plots.length,
-    (_) => GlobalKey(),
-  );
+  late final _cells = List.generate(widget.farm.spaceCount, (_) => GlobalKey());
 
   @override
   void initState() {
@@ -349,8 +370,9 @@ class _PlotGridState extends State<PlotGrid> {
   Widget build(BuildContext context) {
     final farm = widget.farm;
     final plots = farm.plots;
-    final columns = math.sqrt(plots.length).ceil();
-    final rows = (plots.length / columns).ceil();
+    final count = farm.spaceCount;
+    final columns = math.sqrt(count).ceil();
+    final rows = (count / columns).ceil();
     final dense = columns >= 8;
     final gap = dense
         ? 1.5
@@ -439,12 +461,26 @@ class _PlotGridState extends State<PlotGrid> {
   }
 
   Widget _cell(Farm farm, List<Plot> plots, int index, bool dense) {
-    if (index >= plots.length) {
+    if (index >= farm.spaceCount) {
       return const DecoratedBox(
         decoration: BoxDecoration(
           color: Color(0x25325230),
           borderRadius: BorderRadius.all(Radius.circular(3)),
         ),
+      );
+    }
+    void tap() {
+      if (!_isGesture) farm.tap(index);
+    }
+
+    if (farm.level.orders case final rules?) {
+      return OrderTile(
+        key: _cells[index],
+        index: index,
+        order: farm.orderAt(index),
+        rules: rules,
+        hazard: farm.hazard?.index == index,
+        onTap: tap,
       );
     }
     return PlotTile(
@@ -454,9 +490,76 @@ class _PlotGridState extends State<PlotGrid> {
       level: farm.level,
       hazard: farm.hazard?.index == index,
       dense: dense,
-      onTap: () {
-        if (!_isGesture) farm.tap(index);
-      },
+      onTap: tap,
+    );
+  }
+}
+
+class OrderTile extends StatelessWidget {
+  const OrderTile({
+    super.key,
+    required this.index,
+    required this.order,
+    required this.rules,
+    required this.hazard,
+    required this.onTap,
+  });
+
+  final int index;
+  final TableOrder? order;
+  final OrderRules rules;
+  final bool hazard;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = order;
+    final next = current?.next(rules) ?? rules.steps.first;
+    return Material(
+      color: hazard ? const Color(0xff833a29) : cream,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: hazard ? gold : ink, width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: DefaultTextStyle(
+                style: TextStyle(
+                  color: hazard ? Colors.white : ink,
+                  fontSize: 14,
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      'Table ${index + 1}',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (hazard)
+                      Text(
+                        '${rules.hazard.label} · Use ${rules.hazard.tool.label}',
+                      ),
+                    Text(
+                      'Next: ${next.label}',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (current != null)
+                      for (var i = 0; i < current.products.length; i++)
+                        Text(
+                          '${i < current.gathered ? '✓' : '○'} ${current.products[i].label}',
+                        ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -544,6 +647,7 @@ class PlotTile extends StatelessWidget {
       Capacity.chickens => const Color(0xff754b2b),
       Capacity.sheep => const Color(0xff3e5e51),
       Capacity.bees => const Color(0xff675221),
+      Capacity.tables => ink,
     };
     final rule = level.production!.hazard;
     final status = hazard ? '${rule.label} · ${rule.tool.label}' : label;
@@ -677,6 +781,14 @@ class RoundOverlay extends StatelessWidget {
                         Text(
                           '${level.collect.label} ${farm.harvested} / ${level.objective}',
                         ),
+                        if (result.awardedRibbon)
+                          const Text(
+                            'Blue Ribbon awarded!',
+                            style: TextStyle(
+                              color: Color(0xff155398),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                         Text('Product earnings: \$${result.earnings}'),
                         if (farm.mode == Mode.timed)
                           Text(
@@ -746,13 +858,15 @@ class FarmMap extends StatefulWidget {
 
 class _FarmMapState extends State<FarmMap> {
   Activity? _selected;
+  int? _viewedExpansion;
 
   @override
   Widget build(BuildContext context) {
     final farm = widget.farm;
+    final expansion = _viewedExpansion ?? farm.progress.expansion;
     final selected =
-        _selected ?? Activity.values[farm.progress.highestUnlocked - 1];
-    final level = farm.definition(selected);
+        _selected ?? Activity.values[farm.progress.unlockedIn(expansion) - 1];
+    final level = farm.definition(selected, expansion: expansion);
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Column(
@@ -761,9 +875,44 @@ class _FarmMapState extends State<FarmMap> {
             children: [
               Expanded(
                 child: Text(
-                  'Farm Map · Expansion ${farm.progress.expansion}',
+                  'Farm Map · Expansion $expansion',
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+              ),
+              if (farm.progress.expansion > GameBalance.firstExpansion)
+                PopupMenuButton<int>(
+                  tooltip: 'Choose Expansion',
+                  icon: const Icon(Icons.map_outlined),
+                  onSelected: (number) => setState(() {
+                    _viewedExpansion = number == farm.progress.expansion
+                        ? null
+                        : number;
+                    _selected = null;
+                  }),
+                  itemBuilder: (context) => [
+                    for (
+                      var number = GameBalance.firstExpansion;
+                      number <= farm.progress.expansion;
+                      number++
+                    )
+                      PopupMenuItem(
+                        value: number,
+                        child: Text('Expansion $number'),
+                      ),
+                  ],
+                ),
+              if (farm.progress.hasBlueRibbon)
+                const Tooltip(
+                  message: 'Blue Ribbon',
+                  child: Icon(
+                    Icons.workspace_premium,
+                    color: Color(0xff144f94),
+                  ),
+                ),
+              TextButton(
+                onPressed: farm.saving ? null : () => _showExpansionOffer(farm),
+                child: const Text('Expand'),
               ),
               Flexible(
                 child: Text(
@@ -802,7 +951,12 @@ class _FarmMapState extends State<FarmMap> {
                       ),
                       children: [
                         for (final activity in Activity.values)
-                          _location(farm, activity, selected == activity),
+                          _location(
+                            farm,
+                            activity,
+                            selected == activity,
+                            expansion,
+                          ),
                       ],
                     ),
                   ),
@@ -834,17 +988,23 @@ class _FarmMapState extends State<FarmMap> {
                                   Text(level.objectiveLabel),
                                   Text(farm.mode.label),
                                   Text(
-                                    farm.isComplete(selected)
+                                    farm.isComplete(
+                                          selected,
+                                          expansion: expansion,
+                                        )
                                         ? 'Completed'
-                                        : farm.canPlay(selected)
+                                        : farm.canPlay(
+                                            selected,
+                                            expansion: expansion,
+                                          )
                                         ? 'Available'
                                         : 'Complete the previous activity to unlock',
                                   ),
-                                  if (farm.canPlay(selected)) ...[
-                                    _capacityPanel(
-                                      farm,
-                                      level.production!.capacity,
-                                    ),
+                                  if (farm.canPlay(
+                                    selected,
+                                    expansion: expansion,
+                                  )) ...[
+                                    _capacityPanel(farm, level.capacity),
                                   ],
                                 ] else
                                   const Text(
@@ -932,15 +1092,20 @@ class _FarmMapState extends State<FarmMap> {
                             ),
                           ),
                         ),
-                        if (farm.canPlay(selected))
+                        if (farm.canPlay(selected, expansion: expansion))
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 10),
                             child: FilledButton(
                               onPressed: farm.saving
                                   ? null
-                                  : () => farm.start(selected),
+                                  : () => farm.start(
+                                      selected,
+                                      expansion: expansion,
+                                    ),
                               child: Text(
-                                farm.isComplete(selected) ? 'Replay' : 'Play',
+                                farm.isComplete(selected, expansion: expansion)
+                                    ? 'Replay'
+                                    : 'Play',
                               ),
                             ),
                           ),
@@ -956,12 +1121,48 @@ class _FarmMapState extends State<FarmMap> {
     );
   }
 
-  Widget _location(Farm farm, Activity activity, bool selected) {
-    final status = farm.isComplete(activity)
+  Future<void> _showExpansionOffer(Farm farm) async {
+    final current = farm.progress.expansion;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Expansion ${current + 1}'),
+        content: Text(
+          'Price: \$${farm.nextExpansionPrice}\n'
+          'Unlock requirements: Blue Ribbon and enough money.\n'
+          '${farm.progress.hasBlueRibbon ? 'Blue Ribbon earned' : 'Earn the ribbon at County Fair'}'
+          ' · Wallet \$${farm.cash}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          FilledButton(
+            onPressed: farm.canExpand
+                ? () => Navigator.pop(context, true)
+                : null,
+            child: const Text('Buy Expansion'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await farm.buyNextExpansion(current);
+    if (mounted && farm.progress.expansion != current) {
+      setState(() {
+        _selected = null;
+        _viewedExpansion = null;
+      });
+    }
+  }
+
+  Widget _location(Farm farm, Activity activity, bool selected, int expansion) {
+    final status = farm.isComplete(activity, expansion: expansion)
         ? 'Completed'
-        : farm.canPlay(activity)
+        : farm.canPlay(activity, expansion: expansion)
         ? 'Available'
-        : farm.balance.production(activity) == null
+        : !farm.definition(activity, expansion: expansion).playable
         ? 'Unavailable'
         : 'Locked';
     return Material(

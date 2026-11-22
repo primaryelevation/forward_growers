@@ -2,8 +2,8 @@
 
 A landscape farming game for Android and iOS. The farm map opens wheat, corn,
 carrots, the apple orchard, Dairy Barn, Chicken Coop, Sheep Pasture, and Bee Yard
-in sequence. Completed activities can be replayed. Farmers Market and County Fair
-are visible on the map as future activities.
+in sequence, followed by Farmers Market and County Fair. Completed activities
+can be replayed, including activities in earlier expansions.
 
 ## Run locally
 
@@ -31,6 +31,12 @@ requires a development team configured in Xcode.
 - Buy more capacity from an unlocked activity panel. Plot purchases apply to
   all field activities. Trees, cow stalls, chicken nests, sheep spaces, and
   beehives are purchased separately.
+- Market and Fair share permanent order tables. Take an order, use Gather
+  Products once per listed item, then pack, deliver, and collect payment. Fair
+  orders also need weighing before packing.
+- The first Fair completion earns a permanent Blue Ribbon. Open **Expand** on
+  the map to buy the next expansion. Use **Choose Expansion** to return to an
+  earlier map.
 - Change modes from the map. Relaxed Mode has no timer and hazards block their
   target until cleared. Timed Challenge has a two-minute timer, activity-specific
   hazard setbacks, and a completion bonus. Expiring keeps earned product money.
@@ -38,15 +44,17 @@ requires a development team configured in Xcode.
 ## Saves and debug tools
 
 The old prototype held progress in memory. This release starts with a new,
-versioned local save. Version 1 saves open with two spaces for each new producer
-while retaining existing progress. The next successful save writes version 2
-to the same file. The wallet is stored as a decimal whole-dollar string.
+versioned local save. Versions 1 and 2 keep their permanent progress and gain
+one order table. Version 1 also gains the starting producer spaces. The next
+successful save writes version 3 to the same file, with completions by absolute
+level and the Blue Ribbon retained through Fair completion history. The wallet
+is stored as a decimal whole-dollar string.
 Unreadable or unsupported saves are backed up beside the active file before a
 fresh farm opens. Committed earnings, purchases, mode, and progression persist
 across restarts. An in-progress attempt starts over after relaunch.
 
 In a debug build, the activity panel offers a confirmed save reset, an isolated
-Expansion 2 preview with the first eight activities ready to play, and the
+Expansion 2 preview with all ten activities ready to play, and the
 isolated 16 × 16 field preview. These controls are absent from release builds.
 
 ## Validate

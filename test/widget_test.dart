@@ -283,9 +283,134 @@ void main() {
       }
       await tester.tap(find.text('Farmers Market').first);
       await tester.pump();
-      expect(find.text('This activity is not yet available.'), findsOneWidget);
+      expect(
+        find.text('Complete the previous activity to unlock'),
+        findsOneWidget,
+      );
       expect(find.text('Play'), findsNothing);
       expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'Bee Yard to ribbon, purchase, Level 11, relaunch and Expansion 1 replay',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(568, 320));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = MemoryStore();
+      late Farm farm;
+      Future<({Farm farm, String? notice})> load() async {
+        final progress =
+            await store.load(balance) ??
+            FarmProgress.fresh(balance)
+                .copyWith(completed: {1, 2, 3, 4, 5, 6, 7});
+        farm = Farm(
+          progress: progress,
+          store: store,
+          balance: balance,
+          clock: clock.stopwatch(),
+        );
+        return (farm: farm, notice: null);
+      }
+
+      await tester.pumpWidget(ForwardGrowers(loadFarm: load));
+      await tester.pumpAndSettle();
+
+      Future<void> apply(Tool tool, Finder tile) async {
+        final label = tool == Tool.plant
+            ? farm.level.activity.label
+            : tool.label;
+        await tester.tap(find.widgetWithText(ActionTile, label));
+        await tester.pump();
+        await tester.tap(tile);
+        await tester.pump();
+      }
+
+      Future<void> play() async {
+        await tester.tap(find.text('Play'));
+        await tester.pump();
+        final level = farm.level;
+        for (var i = 0; i < level.objective; i++) {
+          if (level.orders case final rules?) {
+            final table = find.byType(OrderTile).first;
+            expect(find.text('Next: Take Order'), findsOneWidget);
+            await apply(Tool.takeOrder, table);
+            final products = farm.orderAt(0)!.products;
+            expect(find.text('○ ${products.first.label}'), findsOneWidget);
+            while (farm.orderAt(0) != null) {
+              final next = farm.orderAt(0)!.next(rules);
+              await apply(next, table);
+            }
+          } else {
+            final tile = find.byType(PlotTile).first;
+            await apply(level.prepare, tile);
+            await apply(level.tend, tile);
+            await apply(level.beginProduction, tile);
+            await tester.pump(level.production!.growth);
+            await apply(level.collect, tile);
+          }
+        }
+        expect(find.text('Objective completed'), findsOneWidget);
+      }
+
+      Future<void> continueToMap() async {
+        await tester.tap(find.text('Continue'));
+        await tester.pump();
+      }
+
+      await tester.tap(find.text('Expand'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Buy Expansion'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      for (final number in [8, 9, 10]) {
+        expect(find.text('Level $number'), findsOneWidget);
+        await play();
+        expect(farm.level.number, number);
+        if (number == 10) {
+          expect(find.text('Blue Ribbon awarded!'), findsOneWidget);
+        }
+        await continueToMap();
+      }
+
+      expect(find.byTooltip('Blue Ribbon'), findsOneWidget);
+      expect(farm.cash, BigInt.from(122));
+      await tester.tap(find.text('Expand'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(r'Price: $100'), findsOneWidget);
+      await tester.tap(find.text('Buy Expansion'));
+      await tester.pumpAndSettle();
+      expect(find.text('Farm Map · Expansion 2'), findsOneWidget);
+      expect(find.text('Level 11'), findsOneWidget);
+      expect(farm.cash, BigInt.from(22));
+      await play();
+      expect(farm.level.number, 11);
+      await continueToMap();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(ForwardGrowers(loadFarm: load));
+      await tester.pumpAndSettle();
+      expect(find.text('Farm Map · Expansion 2'), findsOneWidget);
+      expect(find.text('Level 12'), findsOneWidget);
+      expect(find.byTooltip('Blue Ribbon'), findsOneWidget);
+      expect(farm.cash, BigInt.from(37));
+      await tester.tap(find.byTooltip('Choose Expansion'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expansion 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Level 10'), findsOneWidget);
+      await tester.tap(find.text('Replay'));
+      await tester.pump();
+      expect(farm.level.number, 10);
+      expect(find.byType(OrderTile), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 }

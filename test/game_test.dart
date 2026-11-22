@@ -95,7 +95,7 @@ void main() {
       expect(balance.level(10, 1).objective, 21);
       expect(const GameBalance(objectiveGrowth: 3).level(2, 1).objective, 6);
       expect(balance.level(11, 1).activity, balance.level(1, 1).activity);
-      expect(balance.level(1, 9).playable, false);
+      expect(balance.level(1, 9).playable, true);
       expect(() => balance.level(0, 1), throwsRangeError);
       expect(() => balance.level(1, 0), throwsRangeError);
       expect(() => balance.level(1, 11), throwsRangeError);
@@ -431,7 +431,7 @@ void main() {
         '{',
         '{"level":3,"cash":99}',
         '{"version":1}',
-        valid.replaceFirst('"version":2', '"version":99'),
+        valid.replaceFirst('"version":3', '"version":99'),
         valid.replaceFirst('"money":"0"', '"money":"-1"'),
         valid.replaceFirst('"money":"0"', '"money":"0x10"'),
         valid.replaceFirst('"fieldPlots":4', '"fieldPlots":99'),

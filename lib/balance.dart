@@ -20,7 +20,8 @@ enum Capacity {
   dairy('Cow stalls', 'cow stall', 'Cow'),
   chickens('Chicken nests', 'chicken nest', 'Nest'),
   sheep('Sheep spaces', 'sheep space', 'Sheep'),
-  bees('Beehives', 'beehive', 'Hive');
+  bees('Beehives', 'beehive', 'Hive'),
+  tables('Order tables', 'table', 'Table');
 
   const Capacity(this.label, this.purchaseLabel, this.targetLabel);
   final String label;
@@ -59,7 +60,15 @@ enum Tool {
   collectHoney('Collect Honey'),
   lasso('Lasso'),
   farmDog('Farm Dog'),
-  shepherdsCrook('Shepherd’s Crook');
+  shepherdsCrook('Shepherd’s Crook'),
+  takeOrder('Take Order'),
+  gather('Gather Products'),
+  weigh('Weigh'),
+  pack('Pack'),
+  deliver('Deliver'),
+  collectMoney('Collect Money'),
+  broom('Broom'),
+  tarp('Tarp');
 
   const Tool(this.label);
   final String label;
@@ -74,6 +83,30 @@ typedef Production = ({
   Capacity capacity,
   (Tool, Tool, Tool, Tool) actions,
   HazardRule hazard,
+});
+
+enum Goods {
+  wheat('Wheat'),
+  corn('Corn'),
+  carrots('Carrots'),
+  apples('Apples'),
+  milk('Milk'),
+  eggs('Eggs'),
+  wool('Wool'),
+  honey('Honey');
+
+  const Goods(this.label);
+  final String label;
+}
+
+enum OrderSetback { loseProduct, rewind }
+
+typedef OrderRules = ({
+  int value,
+  List<Tool> steps,
+  List<List<Goods>> templates,
+  ({String label, Tool tool}) hazard,
+  OrderSetback setback,
 });
 
 class GameBalance {
@@ -109,6 +142,7 @@ class GameBalance {
     Capacity.chickens: _producerCapacity,
     Capacity.sheep: _producerCapacity,
     Capacity.bees: _producerCapacity,
+    Capacity.tables: (start: 1, increment: 1, price: 50),
   };
 
   final Duration wheatGrowth;
@@ -193,6 +227,62 @@ class GameBalance {
     _ => null,
   };
 
+  static const _market = (
+    value: 8,
+    steps: [
+      Tool.takeOrder,
+      Tool.gather,
+      Tool.pack,
+      Tool.deliver,
+      Tool.collectMoney,
+    ],
+    templates: [
+      [Goods.wheat, Goods.eggs],
+      [Goods.corn, Goods.milk],
+      [Goods.carrots, Goods.honey],
+      [Goods.apples, Goods.wool],
+    ],
+    hazard: (label: 'Raccoon', tool: Tool.broom),
+    setback: OrderSetback.loseProduct,
+  );
+
+  static const _fair = (
+    value: 12,
+    steps: [
+      Tool.takeOrder,
+      Tool.gather,
+      Tool.weigh,
+      Tool.pack,
+      Tool.deliver,
+      Tool.collectMoney,
+    ],
+    templates: [
+      [Goods.wheat, Goods.carrots, Goods.eggs],
+      [Goods.corn, Goods.apples, Goods.milk, Goods.honey],
+      [Goods.wool, Goods.eggs, Goods.apples],
+      [Goods.milk, Goods.wheat, Goods.carrots, Goods.wool],
+      [Goods.apples, Goods.corn, Goods.honey, Goods.eggs],
+    ],
+    hazard: (label: 'Rain', tool: Tool.tarp),
+    setback: OrderSetback.rewind,
+  );
+
+  OrderRules? orders(Activity activity) => switch (activity) {
+    Activity.market => _market,
+    Activity.fair => _fair,
+    _ => null,
+  };
+
+  BigInt expansionPrice(int expansion) {
+    _checkExpansion(expansion);
+    return BigInt.from(100) * BigInt.two.pow(expansion - 1);
+  }
+
+  int firstLevel(int expansion) {
+    _checkExpansion(expansion);
+    return (expansion - 1) * Activity.values.length + 1;
+  }
+
   int startingCapacity(Capacity capacity) => _capacities[capacity]!.start;
 
   int capacityLimit(Capacity capacity, int expansion) {
@@ -221,15 +311,18 @@ class GameBalance {
     RangeError.checkValueInInterval(activityNumber, 1, Activity.values.length);
     final activity = Activity.values[activityNumber - 1];
     final work = production(activity);
+    final order = orders(activity);
+    final value = work?.value ?? order?.value;
     return LevelDefinition(
-      number: (expansion - 1) * Activity.values.length + activityNumber,
+      number: firstLevel(expansion) + activityNumber - 1,
       activity: activity,
       objective:
           baseTargets[activity.index] + objectiveGrowth * (expansion - 1),
       production: work,
-      unitValue: work == null
+      orders: order,
+      unitValue: value == null
           ? null
-          : _scale(work.value, _earningsScale, expansion),
+          : _scale(value, _earningsScale, expansion),
     );
   }
 
@@ -258,6 +351,7 @@ class LevelDefinition {
     required this.activity,
     required this.objective,
     required this.production,
+    required this.orders,
     required this.unitValue,
   });
 
@@ -265,10 +359,18 @@ class LevelDefinition {
   final Activity activity;
   final int objective;
   final Production? production;
+  final OrderRules? orders;
   final BigInt? unitValue;
 
-  bool get playable => production != null;
-  Capacity get capacity => production!.capacity;
+  bool get playable => production != null || orders != null;
+  Capacity get capacity => production?.capacity ?? Capacity.tables;
+  ({String label, Tool tool}) get hazard {
+    if (production case final work?) {
+      return (label: work.hazard.label, tool: work.hazard.tool);
+    }
+    return orders!.hazard;
+  }
+
   bool get orchard => production?.capacity == Capacity.orchard;
   bool get field => production?.capacity == Capacity.field;
   String get objectiveLabel => switch (activity) {
@@ -277,10 +379,11 @@ class LevelDefinition {
     Activity.chickens => 'Collect $objective egg batches',
     Activity.sheep => 'Shear $objective times',
     Activity.bees => 'Collect $objective jars of honey',
+    Activity.market || Activity.fair => 'Fill $objective orders',
     _ => 'Harvest $objective crops',
   };
   Tool get prepare => production!.actions.$1;
   Tool get tend => production!.actions.$2;
   Tool get beginProduction => production!.actions.$3;
-  Tool get collect => production!.actions.$4;
+  Tool get collect => orders?.steps.last ?? production!.actions.$4;
 }

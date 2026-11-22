@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'balance.dart';
+import 'orders.dart';
 import 'progress.dart';
 
 enum Phase { map, playing, paused, results }
@@ -13,6 +14,7 @@ typedef ActiveHazard = ({int index, Duration startedAt});
 typedef AttemptResult = ({
   bool completed,
   bool replay,
+  bool awardedRibbon,
   BigInt earnings,
   BigInt bonus,
 });
@@ -32,6 +34,8 @@ class Farm extends ChangeNotifier {
   final Stopwatch? _clock;
   FarmProgress _progress;
   List<Plot> _plots = [];
+  List<TableOrder?> _orders = [];
+  int _nextTemplate = 0;
   Phase _phase = Phase.map;
   LevelDefinition? _level;
   Mode? _attemptMode;
@@ -52,6 +56,8 @@ class Farm extends ChangeNotifier {
 
   FarmProgress get progress => _progress;
   List<Plot> get plots => List.unmodifiable(_plots);
+  int get spaceCount => _plots.length + _orders.length;
+  TableOrder? orderAt(int index) => _orders[index];
   Phase get phase => _phase;
   LevelDefinition get level => _level!;
   Mode get mode => _attemptMode ?? progress.mode;
@@ -68,15 +74,37 @@ class Farm extends ChangeNotifier {
     return limit == null ? null : max(0, limit.inSeconds - _elapsed.inSeconds);
   }
 
-  LevelDefinition definition(Activity activity) =>
-      balance.level(progress.expansion, activity.index + 1);
+  LevelDefinition definition(Activity activity, {int? expansion}) =>
+      balance.level(expansion ?? progress.expansion, activity.index + 1);
 
-  bool canPlay(Activity activity) =>
-      balance.production(activity) != null &&
-      activity.index < progress.highestUnlocked;
+  bool canPlay(Activity activity, {int? expansion}) {
+    final chosen = expansion ?? progress.expansion;
+    return chosen >= GameBalance.firstExpansion &&
+        chosen <= progress.expansion &&
+        definition(activity, expansion: chosen).playable &&
+        activity.index < progress.unlockedIn(chosen);
+  }
 
-  bool isComplete(Activity activity) =>
-      progress.completed.contains(activity.index + 1);
+  bool isComplete(Activity activity, {int? expansion}) => progress.completed
+      .contains(definition(activity, expansion: expansion).number);
+
+  BigInt get nextExpansionPrice => balance.expansionPrice(progress.expansion);
+
+  bool get canExpand =>
+      phase == Phase.map &&
+      !saving &&
+      progress.hasBlueRibbon &&
+      cash >= nextExpansionPrice;
+
+  Future<void> buyNextExpansion(int expectedExpansion) async {
+    if (expectedExpansion != progress.expansion || !canExpand) return;
+    await _commit(
+      progress.copyWith(
+        expansion: progress.expansion + 1,
+        money: cash - nextExpansionPrice,
+      ),
+    );
+  }
 
   int capacityLimit(Capacity kind) =>
       balance.capacityLimit(kind, progress.expansion);
@@ -104,10 +132,14 @@ class Farm extends ChangeNotifier {
     await _commit(FarmProgress.fresh(balance));
   }
 
-  void start(Activity activity) {
-    if (phase != Phase.map || saving || !canPlay(activity)) return;
-    final definition = this.definition(activity);
-    _begin(definition, progress.capacity(definition.production!.capacity));
+  void start(Activity activity, {int? expansion}) {
+    if (phase != Phase.map ||
+        saving ||
+        !canPlay(activity, expansion: expansion)) {
+      return;
+    }
+    final definition = this.definition(activity, expansion: expansion);
+    _begin(definition, progress.capacity(definition.capacity));
   }
 
   void startPreviewForDebug(int count) {
@@ -122,8 +154,11 @@ class Farm extends ChangeNotifier {
   void _begin(LevelDefinition definition, int count) {
     _level = definition;
     _attemptMode = progress.mode;
-    _plots = List.filled(count, emptyPlot);
-    _selection = level.prepare;
+    final rules = level.orders;
+    _plots = rules == null ? List.filled(count, emptyPlot) : [];
+    _orders = rules == null ? [] : List.filled(count, null);
+    _nextTemplate = 0;
+    _selection = rules?.steps.first ?? level.prepare;
     _harvested = 0;
     _earnings = BigInt.zero;
     _elapsed = Duration.zero;
@@ -171,28 +206,36 @@ class Farm extends ChangeNotifier {
 
   Future<void> tap(int index) async {
     if (_clock case final clock?) tick(clock.elapsed);
-    if (phase != Phase.playing ||
-        saving ||
-        index < 0 ||
-        index >= _plots.length) {
+    if (phase != Phase.playing || saving || index < 0 || index >= spaceCount) {
       return;
     }
-    final plot = _plots[index];
-    final rule = level.production!.hazard;
+    final rule = level.hazard;
     if (hazard case (index: final affected, startedAt: final start)
         when index == affected) {
       if (selection != rule.tool) {
         _hint('Use ${rule.tool.label} on the ${rule.label}.');
         return;
       }
-      if (balance.hazardDeadline(mode) == null && plot.readyAt != null) {
-        _plots[index] = (
-          stage: plot.stage,
-          readyAt: plot.readyAt! + (_elapsed - start),
-        );
+      if (level.orders == null && balance.hazardDeadline(mode) == null) {
+        final plot = _plots[index];
+        if (plot.readyAt case final readyAt?) {
+          _plots[index] = (
+            stage: plot.stage,
+            readyAt: readyAt + (_elapsed - start),
+          );
+        }
       }
       _clearHazard();
-    } else if (plot.stage == Stage.bare && selection == level.prepare) {
+      _feedback = null;
+      _notify();
+      return;
+    }
+    if (level.orders case final rules?) {
+      await _workOrder(index, rules);
+      return;
+    }
+    final plot = _plots[index];
+    if (plot.stage == Stage.bare && selection == level.prepare) {
       _plots[index] = (stage: Stage.prepared, readyAt: null);
     } else if (plot.stage == Stage.prepared && selection == level.tend) {
       _plots[index] = (stage: Stage.tended, readyAt: null);
@@ -203,7 +246,7 @@ class Farm extends ChangeNotifier {
         readyAt: _elapsed + level.production!.growth,
       );
     } else if (plot.stage == Stage.ready && selection == level.collect) {
-      await _harvest(index);
+      await _collect(() => _plots[index] = emptyPlot);
       return;
     } else {
       _hint(switch (plot.stage) {
@@ -222,26 +265,51 @@ class Farm extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> _harvest(int index) async {
+  Future<void> _workOrder(int index, OrderRules rules) async {
+    final order = _orders[index];
+    final next = order?.next(rules) ?? rules.steps.first;
+    if (selection != next) {
+      _hint('Select ${next.label}.');
+      return;
+    }
+    if (next == Tool.collectMoney) {
+      await _collect(() => _orders[index] = null);
+      return;
+    }
+    _orders[index] = order == null
+        ? TableOrder(rules.templates[_nextTemplate++ % rules.templates.length])
+        : order.advance(rules);
+    _feedback = null;
+    _notify();
+  }
+
+  Future<void> _collect(VoidCallback resetSpace) async {
     final earnings = _earnings + level.unitValue!;
     final completed = harvested + 1 == level.objective;
-    final replay = isComplete(level.activity);
+    final replay = progress.completed.contains(level.number);
+    final awardedRibbon =
+        completed && level.activity == Activity.fair && !progress.hasBlueRibbon;
     final bonus = completed
         ? balance.completionBonus(mode, earnings)
         : BigInt.zero;
     await _commit(
       progress.copyWith(
         money: cash + level.unitValue! + bonus,
-        completed: completed
-            ? {...progress.completed, level.activity.index + 1}
-            : null,
+        completed: completed ? {...progress.completed, level.number} : null,
       ),
       onSaved: () {
-        _plots[index] = emptyPlot;
+        resetSpace();
         _earnings = earnings;
         _harvested++;
         _feedback = null;
-        if (completed) _finish(completed: true, replay: replay, bonus: bonus);
+        if (completed) {
+          _finish(
+            completed: true,
+            replay: replay,
+            bonus: bonus,
+            awardedRibbon: awardedRibbon,
+          );
+        }
       },
     );
   }
@@ -256,7 +324,7 @@ class Farm extends ChangeNotifier {
     if (limit != null && now >= limit) {
       _finish(
         completed: false,
-        replay: isComplete(level.activity),
+        replay: progress.completed.contains(level.number),
         bonus: BigInt.zero,
       );
       _notify();
@@ -267,7 +335,15 @@ class Farm extends ChangeNotifier {
     final deadline = balance.hazardDeadline(mode);
     if (hazard case (index: final index, startedAt: final start)
         when deadline != null && now - start >= deadline) {
-      _plots[index] = (stage: level.production!.hazard.setback, readyAt: null);
+      if (level.orders case final rules?) {
+        _orders[index] = _orders[index]!.setback(rules);
+        _feedback = null;
+      } else {
+        _plots[index] = (
+          stage: level.production!.hazard.setback,
+          readyAt: null,
+        );
+      }
       _clearHazard();
       changed = true;
     }
@@ -282,11 +358,8 @@ class Farm extends ChangeNotifier {
     if (hazard == null && now >= _nextHazard) {
       _nextHazard = now + balance.spawnInterval;
       final candidates = [
-        for (var i = 0; i < _plots.length; i++)
-          if ((_plots[i].stage == Stage.tended ||
-                  _plots[i].stage == Stage.growing) &&
-              (targetVisible?.call(i) ?? true))
-            i,
+        for (var i = 0; i < spaceCount; i++)
+          if (_hazardTarget(i) && (targetVisible?.call(i) ?? true)) i,
       ];
       if (candidates.isNotEmpty && _random.nextDouble() < balance.spawnChance) {
         _hazard = (
@@ -306,6 +379,12 @@ class Farm extends ChangeNotifier {
     if (changed) _notify();
   }
 
+  bool _hazardTarget(int index) {
+    if (level.orders != null) return (_orders[index]?.gathered ?? 0) > 0;
+    final stage = _plots[index].stage;
+    return stage == Stage.tended || stage == Stage.growing;
+  }
+
   void _clearHazard() {
     _hazard = null;
     _nextHazard = _elapsed + balance.cooldown;
@@ -315,6 +394,7 @@ class Farm extends ChangeNotifier {
     required bool completed,
     required bool replay,
     required BigInt bonus,
+    bool awardedRibbon = false,
   }) {
     _clock?.stop();
     _hazard = null;
@@ -322,6 +402,7 @@ class Farm extends ChangeNotifier {
     _result = (
       completed: completed,
       replay: replay,
+      awardedRibbon: awardedRibbon,
       earnings: _earnings,
       bonus: bonus,
     );

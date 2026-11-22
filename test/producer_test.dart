@@ -125,7 +125,7 @@ void main() {
         farm.returnToMap();
       }
       expect(farm.progress.highestUnlocked, 9);
-      expect(farm.canPlay(Activity.market), false);
+      expect(farm.canPlay(Activity.market), true);
       expect(farm.canPlay(Activity.fair), false);
       farm.start(Activity.dairy);
       await test.complete();
