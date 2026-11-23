@@ -10,14 +10,17 @@ import 'game_test.dart' show MemoryStore;
 Future<Farm> openActivity(
   WidgetTester tester,
   Activity activity,
-  Size size,
-) async {
+  Size size, {
+  Mode mode = Mode.relaxed,
+}) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   const balance = GameBalance(spawnChance: 1);
   final farm = Farm(
-    progress: FarmProgress.fresh(balance)
-        .copyWith(completed: {for (var i = 1; i <= activity.index; i++) i}),
+    progress: FarmProgress.fresh(balance).copyWith(
+      mode: mode,
+      completed: {for (var i = 1; i <= activity.index; i++) i},
+    ),
     store: MemoryStore(),
     balance: balance,
   )..start(activity);
@@ -143,7 +146,7 @@ void main() {
   }
 
   testWidgets(
-    'narrow Fair shows labeled fallbacks and keeps Tarp visible while scrolling',
+    'narrow Fair shows illustrated order controls and keeps Tarp visible while scrolling',
     (tester) async {
       final farm = await openActivity(
         tester,
@@ -154,14 +157,9 @@ void main() {
       final tarp = find.byTooltip('Tarp');
       final takeOrder = find.byTooltip('Take Order');
       final collect = find.byTooltip('Collect Money');
-      expect(find.text('Take Order'), findsOneWidget);
-      expect(
-        find.descendant(of: takeOrder, matching: find.byType(Icon)),
-        findsOneWidget,
-      );
       expect(
         find.descendant(of: takeOrder, matching: find.byType(Image)),
-        findsNothing,
+        findsOneWidget,
       );
       expect(tarp.hitTestable(), findsOneWidget);
       final pinned = tester.getRect(tarp);

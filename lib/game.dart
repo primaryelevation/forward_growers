@@ -204,18 +204,60 @@ class Farm extends ChangeNotifier {
     _notify();
   }
 
+  Tool? nextAction(int index) {
+    if (index < 0 || index >= spaceCount) return null;
+    if (hazard?.index == index) return level.hazard.tool;
+    if (level.orders case final rules?) {
+      return _orders[index]?.next(rules) ?? rules.steps.first;
+    }
+    return switch (_plots[index].stage) {
+      Stage.bare => level.prepare,
+      Stage.prepared => level.tend,
+      Stage.tended => level.beginProduction,
+      Stage.growing => null,
+      Stage.ready => level.collect,
+    };
+  }
+
+  bool canApply(int index) =>
+      phase == Phase.playing &&
+      !saving &&
+      selection != null &&
+      selection == nextAction(index);
+
+  double? growthProgress(int index) {
+    final readyAt = _plots[index].readyAt;
+    if (readyAt == null) return null;
+    final work = level.production!.growth.inMicroseconds;
+    final elapsed =
+        hazard?.index == index && balance.hazardDeadline(mode) == null
+        ? hazard!.startedAt
+        : _elapsed;
+    return (1 - (readyAt - elapsed).inMicroseconds / work).clamp(0.0, 1.0);
+  }
+
   Future<void> tap(int index) async {
     if (_clock case final clock?) tick(clock.elapsed);
     if (phase != Phase.playing || saving || index < 0 || index >= spaceCount) {
       return;
     }
-    final rule = level.hazard;
+    if (!canApply(index)) {
+      final next = nextAction(index);
+      _hint(
+        hazard?.index == index
+            ? 'Use ${level.hazard.tool.label} on the ${level.hazard.label}.'
+            : next == null
+            ? 'Still growing.'
+            : level.field && next == Tool.plant
+            ? 'Select ${level.activity.label} and plant.'
+            : level.orders == null && next == level.prepare
+            ? '${next.label} first.'
+            : 'Select ${next.label}.',
+      );
+      return;
+    }
     if (hazard case (index: final affected, startedAt: final start)
         when index == affected) {
-      if (selection != rule.tool) {
-        _hint('Use ${rule.tool.label} on the ${rule.label}.');
-        return;
-      }
       if (level.orders == null && balance.hazardDeadline(mode) == null) {
         final plot = _plots[index];
         if (plot.readyAt case final readyAt?) {
@@ -226,59 +268,36 @@ class Farm extends ChangeNotifier {
         }
       }
       _clearHazard();
-      _feedback = null;
-      _notify();
-      return;
-    }
-    if (level.orders case final rules?) {
-      await _workOrder(index, rules);
-      return;
-    }
-    final plot = _plots[index];
-    if (plot.stage == Stage.bare && selection == level.prepare) {
-      _plots[index] = (stage: Stage.prepared, readyAt: null);
-    } else if (plot.stage == Stage.prepared && selection == level.tend) {
-      _plots[index] = (stage: Stage.tended, readyAt: null);
-    } else if (plot.stage == Stage.tended &&
-        selection == level.beginProduction) {
-      _plots[index] = (
-        stage: Stage.growing,
-        readyAt: _elapsed + level.production!.growth,
-      );
-    } else if (plot.stage == Stage.ready && selection == level.collect) {
-      await _collect(() => _plots[index] = emptyPlot);
-      return;
+    } else if (level.orders case final rules?) {
+      final order = _orders[index];
+      if (selection == Tool.collectMoney) {
+        await _collect(() => _orders[index] = null);
+        return;
+      }
+      _orders[index] = order == null
+          ? TableOrder(
+              rules.templates[_nextTemplate++ % rules.templates.length],
+            )
+          : order.advance(rules);
     } else {
-      _hint(switch (plot.stage) {
-        Stage.bare => '${level.prepare.label} first.',
-        Stage.prepared =>
-          level.field
-              ? 'Select ${level.activity.label} and plant.'
-              : 'Select ${level.tend.label}.',
-        Stage.tended => 'Select ${level.beginProduction.label}.',
-        Stage.growing => 'Still growing.',
-        Stage.ready => 'Select ${level.collect.label}.',
-      });
-      return;
+      final plot = _plots[index];
+      switch (plot.stage) {
+        case Stage.bare:
+          _plots[index] = (stage: Stage.prepared, readyAt: null);
+        case Stage.prepared:
+          _plots[index] = (stage: Stage.tended, readyAt: null);
+        case Stage.tended:
+          _plots[index] = (
+            stage: Stage.growing,
+            readyAt: _elapsed + level.production!.growth,
+          );
+        case Stage.growing:
+          return;
+        case Stage.ready:
+          await _collect(() => _plots[index] = emptyPlot);
+          return;
+      }
     }
-    _feedback = null;
-    _notify();
-  }
-
-  Future<void> _workOrder(int index, OrderRules rules) async {
-    final order = _orders[index];
-    final next = order?.next(rules) ?? rules.steps.first;
-    if (selection != next) {
-      _hint('Select ${next.label}.');
-      return;
-    }
-    if (next == Tool.collectMoney) {
-      await _collect(() => _orders[index] = null);
-      return;
-    }
-    _orders[index] = order == null
-        ? TableOrder(rules.templates[_nextTemplate++ % rules.templates.length])
-        : order.advance(rules);
     _feedback = null;
     _notify();
   }
@@ -319,6 +338,8 @@ class Farm extends ChangeNotifier {
     final now = elapsed ?? _clock?.elapsed ?? _elapsed;
     if (now < _elapsed) return;
     final lastRemaining = remaining;
+    final progressChanged =
+        now.inMilliseconds ~/ 100 != _elapsed.inMilliseconds ~/ 100;
     _elapsed = now;
     final limit = balance.timeLimit(mode);
     if (limit != null && now >= limit) {
@@ -352,6 +373,8 @@ class Farm extends ChangeNotifier {
       final readyAt = _plots[i].readyAt;
       if (readyAt != null && now >= readyAt) {
         _plots[i] = (stage: Stage.ready, readyAt: null);
+        changed = true;
+      } else if (readyAt != null && progressChanged) {
         changed = true;
       }
     }

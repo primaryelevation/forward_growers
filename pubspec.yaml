@@ -29,3 +29,29 @@ flutter:
     - assets/tools/hammer.png
     - assets/tools/noisemaker.png
     - assets/tools/dog_whistle.png
+    - assets/tools/broom.png
+    - assets/tools/brush.png
+    - assets/tools/clean_nest.png
+    - assets/tools/collect_eggs.png
+    - assets/tools/collect_honey.png
+    - assets/tools/collect_money.png
+    - assets/tools/combine.png
+    - assets/tools/deliver.png
+    - assets/tools/farm_dog.png
+    - assets/tools/feed.png
+    - assets/tools/fertilize.png
+    - assets/tools/gather.png
+    - assets/tools/irrigation.png
+    - assets/tools/lasso.png
+    - assets/tools/milk.png
+    - assets/tools/orchard_whistle.png
+    - assets/tools/pack.png
+    - assets/tools/pick.png
+    - assets/tools/plant_flowers.png
+    - assets/tools/prune.png
+    - assets/tools/shear.png
+    - assets/tools/shepherds_crook.png
+    - assets/tools/smoke_hive.png
+    - assets/tools/take_order.png
+    - assets/tools/tarp.png
+    - assets/tools/weigh.png

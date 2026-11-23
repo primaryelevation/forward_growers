@@ -298,7 +298,30 @@ class ToolsPanel extends StatelessWidget {
       Tool.hammer => (name: 'Hammer', file: 'hammer'),
       Tool.noisemaker => (name: 'Noisemaker', file: 'noisemaker'),
       Tool.dogWhistle => (name: 'Dog Whistle', file: 'dog_whistle'),
-      _ => null,
+      Tool.prune => (name: tool.label, file: 'prune'),
+      Tool.fertilize => (name: tool.label, file: 'fertilize'),
+      Tool.pick => (name: tool.label, file: 'pick'),
+      Tool.orchardWhistle => (name: tool.label, file: 'orchard_whistle'),
+      Tool.feed => (name: tool.label, file: 'feed'),
+      Tool.brush => (name: tool.label, file: 'brush'),
+      Tool.milk => (name: tool.label, file: 'milk'),
+      Tool.cleanNest => (name: tool.label, file: 'clean_nest'),
+      Tool.collectEggs => (name: tool.label, file: 'collect_eggs'),
+      Tool.shear => (name: tool.label, file: 'shear'),
+      Tool.plantFlowers => (name: tool.label, file: 'plant_flowers'),
+      Tool.smokeHive => (name: tool.label, file: 'smoke_hive'),
+      Tool.collectHoney => (name: tool.label, file: 'collect_honey'),
+      Tool.lasso => (name: tool.label, file: 'lasso'),
+      Tool.farmDog => (name: tool.label, file: 'farm_dog'),
+      Tool.shepherdsCrook => (name: tool.label, file: 'shepherds_crook'),
+      Tool.takeOrder => (name: tool.label, file: 'take_order'),
+      Tool.gather => (name: tool.label, file: 'gather'),
+      Tool.weigh => (name: tool.label, file: 'weigh'),
+      Tool.pack => (name: tool.label, file: 'pack'),
+      Tool.deliver => (name: tool.label, file: 'deliver'),
+      Tool.collectMoney => (name: tool.label, file: 'collect_money'),
+      Tool.broom => (name: tool.label, file: 'broom'),
+      Tool.tarp => (name: tool.label, file: 'tarp'),
     };
 
 class ActionTile extends StatelessWidget {
@@ -368,16 +391,108 @@ class ActionTile extends StatelessWidget {
                           ),
                         ],
                       )
-                    : Image.asset(
-                        'assets/tools/${illustration.file}.png',
-                        fit: BoxFit.contain,
-                        excludeFromSemantics: true,
+                    : ToolArtwork(
+                        action: action,
+                        activity: farm.level.activity,
                       ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+String _actionName(Tool action, Activity activity) =>
+    _illustration(action, activity)?.name ?? action.label;
+
+class ToolArtwork extends StatelessWidget {
+  const ToolArtwork({super.key, required this.action, required this.activity});
+
+  final Tool action;
+  final Activity activity;
+
+  @override
+  Widget build(BuildContext context) {
+    final illustration = _illustration(action, activity);
+    if (illustration == null) {
+      return FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Icon(toolIcon(action), size: 23, color: ink),
+      );
+    }
+    return Image.asset(
+      'assets/tools/${illustration.file}.png',
+      fit: BoxFit.contain,
+      excludeFromSemantics: true,
+    );
+  }
+}
+
+class ActionBadge extends StatelessWidget {
+  const ActionBadge({
+    super.key,
+    required this.action,
+    required this.activity,
+    required this.size,
+  });
+
+  final Tool action;
+  final Activity activity;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: ExcludeSemantics(
+      child: SizedBox.square(
+        dimension: size,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: cream,
+            borderRadius: BorderRadius.circular(size / 6),
+          ),
+          child: Padding(
+            padding: EdgeInsets.all(size * .07),
+            child: ToolArtwork(action: action, activity: activity),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _BoardCue extends StatelessWidget {
+  const _BoardCue({
+    required this.action,
+    required this.activity,
+    required this.child,
+  });
+
+  final Tool? action;
+  final Activity activity;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final next = action;
+    if (next == null) return child;
+    return LayoutBuilder(
+      builder: (context, bounds) {
+        final size = math.min(
+          29.0,
+          math.min(bounds.maxWidth, bounds.maxHeight) * .45,
+        );
+        return Row(
+          children: [
+            Expanded(child: child),
+            Padding(
+              padding: EdgeInsets.only(right: size * .12),
+              child: ActionBadge(action: next, activity: activity, size: size),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -541,6 +656,9 @@ class _PlotGridState extends State<PlotGrid> {
         index: index,
         order: farm.orderAt(index),
         rules: rules,
+        activity: farm.level.activity,
+        next: farm.nextAction(index),
+        highlighted: farm.canApply(index),
         hazard: farm.hazard?.index == index,
         onTap: tap,
       );
@@ -550,6 +668,9 @@ class _PlotGridState extends State<PlotGrid> {
       index: index,
       plot: plots[index],
       level: farm.level,
+      next: farm.nextAction(index),
+      highlighted: farm.canApply(index),
+      progress: farm.growthProgress(index),
       hazard: farm.hazard?.index == index,
       dense: dense,
       onTap: tap,
@@ -563,6 +684,9 @@ class OrderTile extends StatelessWidget {
     required this.index,
     required this.order,
     required this.rules,
+    required this.activity,
+    required this.next,
+    required this.highlighted,
     required this.hazard,
     required this.onTap,
   });
@@ -570,52 +694,74 @@ class OrderTile extends StatelessWidget {
   final int index;
   final TableOrder? order;
   final OrderRules rules;
+  final Activity activity;
+  final Tool? next;
+  final bool highlighted;
   final bool hazard;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final current = order;
-    final next = current?.next(rules) ?? rules.steps.first;
-    return Material(
-      color: hazard ? const Color(0xff833a29) : cream,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: hazard ? gold : ink, width: 2),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: DefaultTextStyle(
-                style: TextStyle(
-                  color: hazard ? Colors.white : ink,
-                  fontSize: 14,
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      'Table ${index + 1}',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+    final nextLabel = next == null ? '' : _actionName(next!, activity);
+    return Semantics(
+      button: true,
+      label: 'Table ${index + 1}, next action: $nextLabel',
+      child: Material(
+        color: hazard ? const Color(0xff833a29) : cream,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: highlighted
+                ? const Color(0xff8dd497)
+                : hazard
+                ? gold
+                : ink,
+            width: 2,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: _BoardCue(
+            action: next,
+            activity: activity,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: DefaultTextStyle(
+                    style: TextStyle(
+                      color: hazard ? Colors.white : ink,
+                      fontSize: 14,
                     ),
-                    if (hazard)
-                      Text(
-                        '${rules.hazard.label} · Use ${rules.hazard.tool.label}',
-                      ),
-                    Text(
-                      'Next: ${next.label}',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    if (current != null)
-                      for (var i = 0; i < current.products.length; i++)
+                    child: Column(
+                      children: [
                         Text(
-                          '${i < current.gathered ? '✓' : '○'} ${current.products[i].label}',
+                          'Table ${index + 1}',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
-                  ],
+                        if (hazard)
+                          Text(
+                            '${rules.hazard.label} · Use ${rules.hazard.tool.label}',
+                          ),
+                        Text(
+                          'Next: $nextLabel',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        if (current != null) ...[
+                          Text(
+                            'Gathered ${current.gathered} / ${current.products.length}',
+                          ),
+                          for (var i = 0; i < current.products.length; i++)
+                            Text(
+                              '${i < current.gathered ? '✓' : '○'} ${current.products[i].label}',
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -632,6 +778,9 @@ class PlotTile extends StatelessWidget {
     required this.index,
     required this.plot,
     required this.level,
+    required this.next,
+    required this.highlighted,
+    required this.progress,
     required this.hazard,
     required this.dense,
     required this.onTap,
@@ -640,6 +789,9 @@ class PlotTile extends StatelessWidget {
   final int index;
   final Plot plot;
   final LevelDefinition level;
+  final Tool? next;
+  final bool highlighted;
+  final double? progress;
   final bool hazard;
   final bool dense;
   final VoidCallback onTap;
@@ -712,9 +864,12 @@ class PlotTile extends StatelessWidget {
       Capacity.tables => ink,
     };
     final rule = level.production!.hazard;
-    final status = hazard ? '${rule.label} · ${rule.tool.label}' : label;
+    final status = hazard ? rule.label : label;
+    final nextLabel = next == null
+        ? 'Waiting'
+        : 'Next action: ${_actionName(next!, level.activity)}';
     return Semantics(
-      label: '${level.capacity.targetLabel} ${index + 1}, $status',
+      label: '${level.capacity.targetLabel} ${index + 1}, $status. $nextLabel',
       button: true,
       child: Material(
         color: hazard
@@ -728,7 +883,11 @@ class PlotTile extends StatelessWidget {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(dense ? 2 : 10),
           side: BorderSide(
-            color: hazard ? gold : const Color(0xffa5744e),
+            color: highlighted
+                ? const Color(0xff8dd497)
+                : hazard
+                ? gold
+                : const Color(0xffa5744e),
             width: dense ? 1 : 2,
           ),
         ),
@@ -740,28 +899,40 @@ class PlotTile extends StatelessWidget {
             children: [
               if (!dense && level.field)
                 CustomPaint(painter: Furrows(plowed: plot.stage != Stage.bare)),
-              Center(
-                child: Padding(
-                  padding: EdgeInsets.all(dense ? 1 : 4),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Column(
-                      children: [
-                        Icon(
-                          hazard ? Icons.warning_rounded : icon,
-                          color: hazard ? gold : tint,
-                          size: 29,
-                        ),
-                        if (!dense)
-                          Text(
-                            status,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                            ),
+              _BoardCue(
+                action: next,
+                activity: level.activity,
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(dense ? 1 : 4),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Column(
+                        children: [
+                          Icon(
+                            hazard ? Icons.warning_rounded : icon,
+                            color: hazard ? gold : tint,
+                            size: 29,
                           ),
-                      ],
+                          if (progress case final value?)
+                            SizedBox(
+                              width: 48,
+                              child: LinearProgressIndicator(
+                                value: value,
+                                minHeight: 4,
+                              ),
+                            ),
+                          if (!dense)
+                            Text(
+                              status,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
