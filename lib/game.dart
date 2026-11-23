@@ -40,6 +40,7 @@ class Farm extends ChangeNotifier {
   LevelDefinition? _level;
   Mode? _attemptMode;
   Tool? _selection;
+  Goods? _selectedProduct;
   int _harvested = 0;
   BigInt _earnings = BigInt.zero;
   Duration _elapsed = Duration.zero;
@@ -62,6 +63,7 @@ class Farm extends ChangeNotifier {
   LevelDefinition get level => _level!;
   Mode get mode => _attemptMode ?? progress.mode;
   Tool? get selection => _selection;
+  Goods? get selectedProduct => _selectedProduct;
   int get harvested => _harvested;
   ActiveHazard? get hazard => _hazard;
   AttemptResult get result => _result!;
@@ -159,6 +161,7 @@ class Farm extends ChangeNotifier {
     _orders = rules == null ? [] : List.filled(count, null);
     _nextTemplate = 0;
     _selection = rules?.steps.first ?? level.prepare;
+    _selectedProduct = null;
     _harvested = 0;
     _earnings = BigInt.zero;
     _elapsed = Duration.zero;
@@ -199,8 +202,21 @@ class Farm extends ChangeNotifier {
   }
 
   void select(Tool tool) {
-    if (phase != Phase.playing) return;
+    if (phase != Phase.playing || tool == Tool.gather) return;
+    _selectedProduct = null;
     _selection = tool;
+    _notify();
+  }
+
+  bool canSelectProduct(Goods product) =>
+      phase == Phase.playing &&
+      !saving &&
+      _orders.any((order) => order?.needs(product) ?? false);
+
+  void selectProduct(Goods product) {
+    if (!canSelectProduct(product)) return;
+    _selection = null;
+    _selectedProduct = product;
     _notify();
   }
 
@@ -219,11 +235,15 @@ class Farm extends ChangeNotifier {
     };
   }
 
-  bool canApply(int index) =>
-      phase == Phase.playing &&
-      !saving &&
-      selection != null &&
-      selection == nextAction(index);
+  bool canApply(int index) {
+    if (phase != Phase.playing || saving) return false;
+    final next = nextAction(index);
+    if (next == Tool.gather) {
+      final product = selectedProduct;
+      return product != null && _orders[index]!.needs(product);
+    }
+    return selection != null && selection == next;
+  }
 
   double? growthProgress(int index) {
     final readyAt = _plots[index].readyAt;
@@ -246,6 +266,10 @@ class Farm extends ChangeNotifier {
       _hint(
         hazard?.index == index
             ? 'Use ${level.hazard.tool.label} on the ${level.hazard.label}.'
+            : next == Tool.gather
+            ? (selectedProduct == null
+                  ? 'Select a product this table needs.'
+                  : 'This table does not need ${selectedProduct!.label}.')
             : next == null
             ? 'Still growing.'
             : level.field && next == Tool.plant
@@ -278,6 +302,8 @@ class Farm extends ChangeNotifier {
           ? TableOrder(
               rules.templates[_nextTemplate++ % rules.templates.length],
             )
+          : nextAction(index) == Tool.gather
+          ? order.gather(rules, selectedProduct!)
           : order.advance(rules);
     } else {
       final plot = _plots[index];

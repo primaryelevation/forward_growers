@@ -21,6 +21,15 @@ Future<void> act(WidgetTester tester, Farm farm, Tool tool, Finder tile) async {
   await tester.pump();
 }
 
+Future<void> gather(WidgetTester tester, Goods product, Finder tile) async {
+  final button = find.byTooltip(product.label);
+  await tester.ensureVisible(button);
+  await tester.tap(button);
+  await tester.pump();
+  await tester.tap(tile);
+  await tester.pump();
+}
+
 void expectCue(WidgetTester tester, Finder tile, Tool tool, String file) {
   final badge = badgeIn(tile);
   expect(badge, findsOneWidget);
@@ -129,6 +138,39 @@ void main() {
     });
   }
 
+  testWidgets(
+    'two tables highlight only the orders needing the selected product',
+    (tester) async {
+      final farm = await openActivity(
+        tester,
+        Activity.market,
+        const Size(500, 280),
+        tables: 2,
+      );
+      final first = find.byType(OrderTile).first;
+      final second = find.byType(OrderTile).at(1);
+      expect(farm.canSelectProduct(Goods.eggs), false);
+      await act(tester, farm, Tool.takeOrder, first);
+      await act(tester, farm, Tool.takeOrder, second);
+      await tester.tap(find.byTooltip('Milk'));
+      await tester.pump();
+      expect(tester.widget<OrderTile>(first).highlighted, false);
+      expect(tester.widget<OrderTile>(second).highlighted, true);
+      await tester.tap(first);
+      await tester.pump();
+      expect(farm.orderAt(0)!.gathered, 0);
+      expect(farm.orderAt(1)!.gathered, 0);
+      await tester.tap(second);
+      await tester.pump();
+      expect(farm.orderAt(1)!.gatheredProducts, [Goods.milk]);
+      expect(farm.canSelectProduct(Goods.milk), false);
+      await gather(tester, Goods.eggs, first);
+      expect(farm.orderAt(0)!.gatheredProducts, [Goods.eggs]);
+      expect(find.text('✓ Eggs'), findsOneWidget);
+      expect(find.text('✓ Milk'), findsOneWidget);
+    },
+  );
+
   testWidgets('hazard response replaces and restores the usable field cue', (
     tester,
   ) async {
@@ -160,14 +202,17 @@ void main() {
           activity,
           const Size(500, 280),
           mode: Mode.timed,
+          expansion: activity == Activity.fair ? 2 : 1,
         );
+        if (activity == Activity.fair) expect(farm.level.number, 20);
         final tile = find.byType(OrderTile).first;
         expectCue(tester, tile, Tool.takeOrder, 'take_order');
         await act(tester, farm, Tool.takeOrder, tile);
         final goods = farm.orderAt(0)!.products;
-        expectCue(tester, tile, Tool.gather, 'gather');
-        for (final _ in goods) {
-          await act(tester, farm, Tool.gather, tile);
+        expect(badgeIn(tile), findsNothing);
+        expect(find.byTooltip('Gather Products'), findsNothing);
+        for (final product in goods.reversed) {
+          await gather(tester, product, tile);
         }
         if (activity == Activity.fair) {
           expectCue(tester, tile, Tool.weigh, 'weigh');
@@ -185,24 +230,46 @@ void main() {
         );
         farm.tick(farm.balance.safePeriod + farm.balance.responseWindow);
         await tester.pump();
-        expectCue(tester, tile, setback, setbackFile);
         if (activity == Activity.market) {
-          expect(find.text('○ ${goods.last.label}'), findsOneWidget);
+          expect(badgeIn(tile), findsNothing);
+          expect(find.text('○ ${goods.first.label}'), findsOneWidget);
+          expect(farm.canSelectProduct(goods.first), true);
+          expect(farm.canSelectProduct(goods.last), false);
           expect(
             find.text('Gathered ${goods.length - 1} / ${goods.length}'),
             findsOneWidget,
           );
+          await gather(tester, goods.first, tile);
         } else {
+          expectCue(tester, tile, setback, setbackFile);
           expect(
             find.text('Gathered ${goods.length} / ${goods.length}'),
             findsOneWidget,
           );
+          await act(tester, farm, setback, tile);
         }
-        await act(tester, farm, setback, tile);
         await act(tester, farm, Tool.pack, tile);
         await act(tester, farm, Tool.deliver, tile);
         expectCue(tester, tile, Tool.collectMoney, 'collect_money');
-        await act(tester, farm, Tool.collectMoney, tile);
+        final payment = find.byTooltip('Collect Money');
+        expect(payment.hitTestable(), findsOneWidget);
+        final artwork = tester.widget<Image>(
+          find.descendant(of: payment, matching: find.byType(Image)),
+        );
+        expect(
+          (artwork.image as AssetImage).assetName,
+          'assets/tools/collect_money.png',
+        );
+        expect(
+          tester
+              .getRect(find.byType(ToolsPanel))
+              .contains(tester.getRect(payment).bottomRight),
+          true,
+        );
+        await tester.tap(payment);
+        await tester.pump();
+        await tester.tap(tile);
+        await tester.pump();
         expect(farm.harvested, 1);
         expectCue(tester, tile, Tool.takeOrder, 'take_order');
         expect(tester.takeException(), isNull);

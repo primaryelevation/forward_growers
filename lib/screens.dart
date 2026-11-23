@@ -87,12 +87,16 @@ class GameplayScreen extends StatelessWidget {
                   builder: (context, bounds) => Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (orderRules != null)
+                        ProductsPanel(farm: farm, rules: orderRules),
                       Expanded(child: PlotGrid(farm: farm)),
                       ToolsPanel(
                         farm: farm,
                         width: bounds.maxWidth < 650 ? 126 : 154,
                         actions:
-                            orderRules?.steps ??
+                            orderRules?.steps
+                                .where((tool) => tool != Tool.gather)
+                                .toList() ??
                             [
                               level.prepare,
                               level.tend,
@@ -216,6 +220,10 @@ class ToolsPanel extends StatelessWidget {
           builder: (context, bounds) {
             const headingHeight = 17.0;
             const gap = 2.0;
+            final paymentPinned = actions.lastOrNull == Tool.collectMoney;
+            final scrollingActions = paymentPinned
+                ? actions.sublist(0, actions.length - 1)
+                : actions;
             final count = actions.length + 1;
             final fittingSize =
                 (bounds.maxHeight - headingHeight - gap * (count - 1)) / count;
@@ -240,13 +248,13 @@ class ToolsPanel extends StatelessWidget {
                             children: [
                               for (
                                 var index = 0;
-                                index < actions.length;
+                                index < scrollingActions.length;
                                 index++
                               ) ...[
                                 if (index > 0) const SizedBox(height: gap),
                                 ActionTile(
                                   farm: farm,
-                                  action: actions[index],
+                                  action: scrollingActions[index],
                                   size: tileSize,
                                 ),
                               ],
@@ -254,6 +262,14 @@ class ToolsPanel extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (paymentPinned) ...[
+                        const SizedBox(height: gap),
+                        ActionTile(
+                          farm: farm,
+                          action: Tool.collectMoney,
+                          size: tileSize,
+                        ),
+                      ],
                       const SizedBox(height: gap),
                       ActionTile(
                         farm: farm,
@@ -430,6 +446,139 @@ class ToolArtwork extends StatelessWidget {
   }
 }
 
+class ProductArtwork extends StatelessWidget {
+  const ProductArtwork({super.key, required this.product});
+
+  final Goods product;
+
+  @override
+  Widget build(BuildContext context) {
+    final (tool, activity) = switch (product) {
+      Goods.wheat => (Tool.plant, Activity.wheat),
+      Goods.corn => (Tool.plant, Activity.corn),
+      Goods.carrots => (Tool.plant, Activity.carrots),
+      Goods.apples => (Tool.pick, Activity.apples),
+      Goods.milk => (Tool.milk, Activity.dairy),
+      Goods.eggs => (Tool.collectEggs, Activity.chickens),
+      Goods.wool => (Tool.shear, Activity.sheep),
+      Goods.honey => (Tool.collectHoney, Activity.bees),
+    };
+    return ToolArtwork(action: tool, activity: activity);
+  }
+}
+
+class ProductsPanel extends StatelessWidget {
+  const ProductsPanel({super.key, required this.farm, required this.rules});
+
+  final Farm farm;
+  final OrderRules rules;
+
+  @override
+  Widget build(BuildContext context) {
+    final products = rules.templates.expand((template) => template).toSet();
+    return SizedBox(
+      width: 92,
+      child: Material(
+        color: cream,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Column(
+            children: [
+              const Text(
+                'Products',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 2),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, bounds) {
+                    const gap = 2.0;
+                    final rows = (products.length + 1) ~/ 2;
+                    final maxSide = (bounds.maxWidth - gap) / 2;
+                    final fittingSide =
+                        (bounds.maxHeight - gap * (rows - 1)) / rows;
+                    final side = fittingSide.clamp(34.0, maxSide);
+                    return SingleChildScrollView(
+                      child: Center(
+                        child: SizedBox(
+                          width: side * 2 + gap,
+                          child: Wrap(
+                            spacing: gap,
+                            runSpacing: gap,
+                            children: [
+                              for (final product in products)
+                                SizedBox.square(
+                                  dimension: side,
+                                  child: _ProductButton(
+                                    farm: farm,
+                                    product: product,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductButton extends StatelessWidget {
+  const _ProductButton({required this.farm, required this.product});
+  final Farm farm;
+  final Goods product;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = farm.canSelectProduct(product);
+    final selected = farm.selectedProduct == product;
+    final VoidCallback? select = enabled
+        ? () => farm.selectProduct(product)
+        : null;
+    return Semantics(
+      label: product.label,
+      button: true,
+      enabled: enabled,
+      selected: selected,
+      onTap: select,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: product.label,
+        excludeFromSemantics: true,
+        child: Material(
+          color: selected && enabled ? gold : cream,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(7),
+            side: BorderSide(
+              color: selected && enabled ? ink : const Color(0xffb5a477),
+              width: selected && enabled ? 3 : 1,
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: select,
+            child: Padding(
+              padding: EdgeInsets.all(selected && enabled ? 4 : 2),
+              child: Opacity(
+                opacity: enabled ? 1 : .35,
+                child: ProductArtwork(product: product),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ActionBadge extends StatelessWidget {
   const ActionBadge({
     super.key,
@@ -506,7 +655,6 @@ class PlotGrid extends StatefulWidget {
 }
 
 class _PlotGridState extends State<PlotGrid> {
-  final _transform = TransformationController();
   final _viewport = GlobalKey();
   late final _cells = List.generate(widget.farm.spaceCount, (_) => GlobalKey());
 
@@ -539,7 +687,6 @@ class _PlotGridState extends State<PlotGrid> {
   @override
   void dispose() {
     widget.farm.targetVisible = null;
-    _transform.dispose();
     super.dispose();
   }
 
@@ -584,7 +731,6 @@ class _PlotGridState extends State<PlotGrid> {
                 _pointers.remove(event.pointer);
               },
               child: InteractiveViewer(
-                transformationController: _transform,
                 maxScale: 8,
                 child: Column(
                   children: [
@@ -615,20 +761,6 @@ class _PlotGridState extends State<PlotGrid> {
                     ],
                   ],
                 ),
-              ),
-            ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: ValueListenableBuilder(
-                valueListenable: _transform,
-                builder: (context, matrix, _) {
-                  if (matrix.isIdentity()) return const SizedBox.shrink();
-                  return FilledButton(
-                    onPressed: () => _transform.value = Matrix4.identity(),
-                    child: const Text('Full Field'),
-                  );
-                },
               ),
             ),
           ],
@@ -703,10 +835,26 @@ class OrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = order;
-    final nextLabel = next == null ? '' : _actionName(next!, activity);
+    final gathering = next == Tool.gather;
+    final nextLabel = gathering
+        ? 'Choose a needed product'
+        : next == null
+        ? ''
+        : _actionName(next!, activity);
+    final needed = gathering
+        ? current!.products
+              .toSet()
+              .where(current.needs)
+              .map(
+                (product) =>
+                    '${current.requested(product) - current.gatheredCount(product)} ${product.label}',
+              )
+              .join(', ')
+        : '';
     return Semantics(
       button: true,
-      label: 'Table ${index + 1}, next action: $nextLabel',
+      label:
+          'Table ${index + 1}, next action: $nextLabel${needed.isEmpty ? '' : '. Needs $needed'}',
       child: Material(
         color: hazard ? const Color(0xff833a29) : cream,
         shape: RoundedRectangleBorder(
@@ -724,7 +872,7 @@ class OrderTile extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: _BoardCue(
-            action: next,
+            action: gathering ? null : next,
             activity: activity,
             child: Center(
               child: Padding(
@@ -754,10 +902,8 @@ class OrderTile extends StatelessWidget {
                           Text(
                             'Gathered ${current.gathered} / ${current.products.length}',
                           ),
-                          for (var i = 0; i < current.products.length; i++)
-                            Text(
-                              '${i < current.gathered ? '✓' : '○'} ${current.products[i].label}',
-                            ),
+                          for (final product in current.products.toSet())
+                            _OrderProductRow(order: current, product: product),
                         ],
                       ],
                     ),
@@ -768,6 +914,34 @@ class OrderTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _OrderProductRow extends StatelessWidget {
+  const _OrderProductRow({required this.order, required this.product});
+  final TableOrder order;
+  final Goods product;
+
+  @override
+  Widget build(BuildContext context) {
+    final requested = order.requested(product);
+    final gathered = order.gatheredCount(product);
+    final complete = gathered == requested;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!complete) ...[
+          SizedBox.square(
+            dimension: 18,
+            child: ProductArtwork(product: product),
+          ),
+          const SizedBox(width: 4),
+        ],
+        Text(
+          '${complete ? '✓' : '○'} ${product.label}${requested > 1 ? ' $gathered/$requested' : ''}',
+        ),
+      ],
     );
   }
 }

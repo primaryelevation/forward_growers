@@ -12,15 +12,27 @@ Future<Farm> openActivity(
   Activity activity,
   Size size, {
   Mode mode = Mode.relaxed,
+  int expansion = 1,
+  int tables = 1,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   const balance = GameBalance(spawnChance: 1);
   final farm = Farm(
-    progress: FarmProgress.fresh(balance).copyWith(
-      mode: mode,
-      completed: {for (var i = 1; i <= activity.index; i++) i},
-    ),
+    progress: FarmProgress.fresh(balance)
+        .copyWith(
+          mode: mode,
+          expansion: expansion,
+          completed: {
+            for (
+              var i = 1;
+              i < balance.firstLevel(expansion) + activity.index;
+              i++
+            )
+              i,
+          },
+        )
+        .withPurchase(Capacity.tables, tables, BigInt.zero),
     store: MemoryStore(),
     balance: balance,
   )..start(activity);
@@ -172,7 +184,7 @@ void main() {
       expect(collect.hitTestable(), findsOneWidget);
       expect(tester.getRect(tarp), pinned);
       expect(tarp.hitTestable(), findsOneWidget);
-      expect(tester.getSize(tile).width, greaterThan(275));
+      expect(tester.getSize(tile).width, greaterThan(175));
       expect(tester.takeException(), isNull);
     },
   );

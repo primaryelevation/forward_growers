@@ -149,6 +149,10 @@ void main() {
 
       final tiles = find.byType(PlotTile);
       expect(tiles, findsNWidgets(256));
+      expect(tiles.last.hitTestable(), findsOneWidget);
+      await tester.tap(tiles.last);
+      await tester.pump();
+      expect(tester.widget<PlotTile>(tiles.last).plot.stage, Stage.prepared);
       final point = tester.getCenter(tiles.at(119));
       final first = await tester.startGesture(point - const Offset(20, 0));
       final second = await tester.startGesture(point + const Offset(20, 0));
@@ -157,7 +161,7 @@ void main() {
       await first.up();
       await second.up();
       await tester.pumpAndSettle();
-      expect(find.text('Full Field'), findsOneWidget);
+      expect(find.text('Full Field'), findsNothing);
       expect(tester.widget<PlotTile>(tiles.at(119)).plot.stage, Stage.bare);
       await tester.tap(tiles.at(119));
       await tester.pump();
@@ -340,7 +344,18 @@ void main() {
             expect(find.text('○ ${products.first.label}'), findsOneWidget);
             while (farm.orderAt(0) != null) {
               final next = farm.orderAt(0)!.next(rules);
-              await apply(next, table);
+              if (next == Tool.gather) {
+                final current = farm.orderAt(0)!;
+                final product = current.products.firstWhere(current.needs);
+                final button = find.byTooltip(product.label);
+                await tester.ensureVisible(button);
+                await tester.tap(button);
+                await tester.pump();
+                await tester.tap(table);
+                await tester.pump();
+              } else {
+                await apply(next, table);
+              }
             }
           } else {
             final tile = find.byType(PlotTile).first;

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forward_growers/balance.dart';
 import 'package:forward_growers/progress.dart';
+import 'package:forward_growers/orders.dart';
 
 import 'game_test.dart' show MemoryStore, TestFarm;
 
@@ -12,12 +13,31 @@ const balance = GameBalance.standard;
 
 Set<int> through(int number) => {for (var i = 1; i <= number; i++) i};
 
+Future<void> gatherProduct(
+  TestFarm test,
+  Goods product, [
+  int index = 0,
+]) async {
+  test.farm.selectProduct(product);
+  await test.farm.tap(index);
+}
+
+Future<void> nextStep(TestFarm test, int index) async {
+  final order = test.farm.orderAt(index)!;
+  final next = order.next(test.farm.level.orders!);
+  if (next == Tool.gather) {
+    await gatherProduct(test, order.products.firstWhere(order.needs), index);
+  } else {
+    await test.act(next, index);
+  }
+}
+
 Future<void> fillOrder(TestFarm test, [int index = 0]) async {
   final farm = test.farm;
   final rules = farm.level.orders!;
   if (farm.orderAt(index) == null) await test.act(Tool.takeOrder, index);
   while (farm.orderAt(index)!.next(rules) != Tool.collectMoney) {
-    await test.act(farm.orderAt(index)!.next(rules), index);
+    await nextStep(test, index);
   }
   await test.act(Tool.collectMoney, index);
 }
@@ -30,6 +50,27 @@ Future<void> finishOrders(TestFarm test) async {
 }
 
 void main() {
+  test(
+    'Eggs and Milk must be gathered separately and duplicate quantities count',
+    () {
+      final rules = balance.orders(Activity.market)!;
+      const initial = TableOrder([Goods.eggs, Goods.milk, Goods.eggs]);
+      final milk = initial.gather(rules, Goods.milk);
+      expect(milk.gather(rules, Goods.milk), same(milk));
+      final firstEgg = milk.gather(rules, Goods.eggs);
+      expect(firstEgg.requested(Goods.eggs), 2);
+      expect(firstEgg.gatheredCount(Goods.eggs), 1);
+      expect(firstEgg.next(rules), Tool.gather);
+      expect(firstEgg.gather(rules, Goods.corn), same(firstEgg));
+      final complete = firstEgg.gather(rules, Goods.eggs);
+      expect(complete.next(rules), Tool.pack);
+      final setback = complete.setback(rules);
+      expect(setback.gatheredProducts, [Goods.milk, Goods.eggs]);
+      expect(setback.needs(Goods.eggs), true);
+      expect(setback.needs(Goods.milk), false);
+    },
+  );
+
   test(
     'market orders use independent tables, controlled templates and one payout',
     () async {
@@ -61,12 +102,18 @@ void main() {
       await test.act(Tool.takeOrder, 1);
       expect(farm.orderAt(0)!.products, rules.templates.first);
       expect(farm.orderAt(1)!.products, rules.templates[1]);
-      await test.act(Tool.gather);
-      expect(farm.orderAt(0)!.gathered, 1);
+      expect(farm.canSelectProduct(Goods.eggs), true);
+      expect(farm.canSelectProduct(Goods.milk), true);
+      expect(farm.canSelectProduct(Goods.honey), false);
+      await gatherProduct(test, Goods.milk);
+      expect(farm.orderAt(0)!.gathered, 0);
+      expect(farm.canApply(1), true);
+      await gatherProduct(test, Goods.eggs);
+      expect(farm.orderAt(0)!.gatheredProducts, [Goods.eggs]);
       expect(farm.orderAt(1)!.gathered, 0);
       await test.act(Tool.deliver);
       expect(farm.orderAt(0)!.next(rules), Tool.gather);
-      await test.act(Tool.gather);
+      await gatherProduct(test, Goods.wheat);
       await test.act(Tool.pack);
       await test.act(Tool.deliver);
       expect(farm.cash, BigInt.from(50));
@@ -105,7 +152,7 @@ void main() {
           final rules = farm.level.orders!;
           await test.act(Tool.takeOrder);
           while (farm.orderAt(0)!.next(rules) != Tool.deliver) {
-            await test.act(farm.orderAt(0)!.next(rules));
+            await nextStep(test, 0);
           }
           final before = farm.orderAt(0)!;
           farm.targetVisible = (index) => index == 0;
